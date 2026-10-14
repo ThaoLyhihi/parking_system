@@ -1,0 +1,123 @@
+# Copy file này thành config.yaml rồi sửa theo bãi xe thực tế.
+# Các giá trị RTSP/COM port lấy cảm hứng từ phần mềm cũ (xem giuxe/giuxe1/Debug_MSSQL/Debug/cameras.config),
+# nhưng phải thay bằng giá trị thật của bãi xe bạn triển khai — không dùng lại IP/thông tin trong file cũ.
+
+database:
+  # Dùng khi chạy LOCAL không qua Docker (dev/test) — không cần cài gì thêm.
+  # Khi chạy qua `docker compose up`, biến môi trường DATABASE_URL (đặt trong
+  # docker-compose.yml) sẽ override giá trị này, tự trỏ vào PostgreSQL đã gói chung
+  # (service "db") — KHÔNG cần cài SQL Server/PostgreSQL riêng trên máy triển khai.
+  url: "sqlite:///parking.db"
+
+# ⚠️ OFFLINE: toàn bộ mục `cameras` PHẢI dùng địa chỉ IP LAN nội bộ (vd 192.168.x.x) như ví dụ
+# dưới đây — KHÔNG dùng hostname DDNS/domain công khai (vd "nha-toi.ddns.net") dù camera đó vẫn
+# là camera tại chỗ, vì phân giải DNS cho hostname công khai cần Internet. Dùng IP LAN thì hệ
+# thống vẫn đọc được camera dù mất Internet, miễn camera/máy chủ AI/agent cùng một mạng LAN.
+#
+# Hỗ trợ 1 đến 4 camera, mỗi mục dưới đây là TUỲ CHỌN — xoá/để trống `source` của camera nào
+# không có thì hệ thống vẫn chạy, chỉ mất đúng chức năng gắn với camera đó:
+#   - gate_in  : camera cổng VÀO, dùng để đọc biển số lúc xe vào — NÊN có, đây là camera quan
+#                trọng nhất. Nếu bãi chỉ có 1 lối ra/vào chung (1 camera duy nhất), chỉ cần cấu
+#                hình camera này và BỎ TRỐNG gate_out — hệ thống tự dùng lại gate_in cho lượt ra.
+#   - gate_out : camera cổng RA (chỉ cần nếu bãi có làn ra riêng biệt với làn vào).
+#   - overview : camera toàn cảnh bãi, dùng cho đếm chỗ trống theo từng ô (Hướng A, tuỳ chọn).
+#   - barrier  : camera khu vực barie, dùng cho module an toàn (mục 1d: KHÔNG có cảm biến vật lý,
+#                camera này đóng vai trò cảm biến duy nhất).
+# Dù dùng 1 hay 4 camera, hệ thống chỉ cần ĐÚNG 1 ĐẦU ĐỌC THẺ (mục `card_reader` dưới) cho cả
+# quét vào và quét ra — server tự biết là vào hay ra dựa trên thẻ đó có phiên gửi xe đang mở hay
+# không (xem app/api/main.py, hàm card_scan), không cần đầu đọc riêng cho mỗi chiều/mỗi làn.
+cameras:
+  gate_in:
+    source: "rtsp://user:pass@192.168.1.10/stream1"   # hoặc đường dẫn file video / 0 cho webcam khi test
+    name: "Camera cong vao"
+  # gate_out:                          # bỏ comment + điền nếu có làn ra riêng
+  #   source: "rtsp://user:pass@192.168.1.13/stream1"
+  #   name: "Camera cong ra"
+  overview:
+    source: "rtsp://user:pass@192.168.1.11/stream1"
+    name: "Camera toan canh"
+  barrier:
+    source: "rtsp://user:pass@192.168.1.12/stream1"
+    name: "Camera barie"
+
+alpr:
+  model_path: "models/licenseplate/detect.onnx"
+  input_size: 896          # khớp đúng input shape của detect.onnx (xem README)
+  conf_threshold: 0.4
+  iou_threshold: 0.45
+
+barrier_safety:
+  # Vùng an toàn (ROI) nơi cần barie quét qua + một đoạn trong lối vào/ra.
+  # Toạ độ theo tỉ lệ (0.0-1.0) của khung hình camera "barrier", không phải pixel tuyệt đối,
+  # để không phụ thuộc độ phân giải camera thật.
+  roi_polygon: [[0.1, 0.5], [0.9, 0.5], [0.9, 1.0], [0.1, 1.0]]
+  clear_frames_required: 8   # số khung hình liên tiếp ROI phải trống mới cho phép đóng barie
+  motion_threshold: 25       # ngưỡng frame-differencing (0-255), mục 6.5 thuyết minh
+
+card_reader:
+  # Đầu đọc thẻ — 4 lựa chọn cho "type":
+  #   "windows_keyboard" : đầu đọc USB kiểu HID keyboard-wedge, chạy agent trên Windows.
+  #   "usb_hid_linux"    : đầu đọc USB kiểu HID keyboard-wedge, chạy agent trên Linux.
+  #   "serial"           : đầu đọc cắm qua cổng COM/RS232 (đúng kiểu phần mềm cũ dùng,
+  #                        xem app/card_reader/serial_reader.py) — điền "port"/"baudrate" dưới.
+  #   "simulated"        : chưa có đầu đọc thật cắm vào, dùng để test.
+  type: "windows_keyboard"
+  device_name_contains: "RFID"   # chỉ dùng cho "usb_hid_linux" — tên thiết bị input chứa chuỗi này
+  # device_path: "/dev/input/event5"   # chỉ dùng cho "usb_hid_linux"
+  # port: "COM7"           # chỉ dùng cho "serial" — đổi type thành "serial" rồi bỏ comment dòng này
+  # baudrate: 9600         # chỉ dùng cho "serial"
+
+hardware_agent:
+  # scripts/windows_hardware_agent.py gọi vào AI Inference Service (đang chạy trong Docker) qua URL này.
+  # Nếu agent chạy trên CÙNG máy Windows với Docker Desktop thì giữ "localhost" là đúng.
+  # ⚠️ OFFLINE: luôn dùng "localhost" hoặc địa chỉ IP LAN (vd "http://192.168.1.5:8000") —
+  # KHÔNG trỏ ra domain/IP công khai hoặc dịch vụ đám mây, nếu không toàn bộ hệ thống (quét
+  # thẻ, mở barie...) sẽ phụ thuộc Internet, đi ngược yêu cầu chạy được khi mất Internet.
+  api_base_url: "http://localhost:8000"
+  api_key: "DOI-KHOA-NAY"   # PHẢI đổi; có thể đặt qua biến môi trường AGENT_API_KEY (ưu tiên hơn). Agent gửi trong header X-Agent-Key.
+  poll_interval_seconds: 0.5   # tần suất hỏi /barrier/{id}/status khi đang chờ đóng barie
+
+barrier_hardware:
+  # Barie vẫn dùng cổng COM/TCP, gửi lệnh đóng/mở đúng kiểu phần mềm cũ — chỉ khác
+  # là AI (BarrierSafetyZone) quyết định THỜI ĐIỂM gửi, không phải thẻ từ.
+  # type: "logging" (mặc định, chỉ in log, AN TOÀN khi đang test code) hoặc "serial" (gửi thật).
+  type: "logging"
+  baudrate: 9600
+  # Các lệnh dưới đây COPY NGUYÊN VĂN từ app.config.xml của phần mềm cũ (khối <Barriers>) —
+  # CHƯA xác minh lại với phần cứng thật, xem cảnh báo trong app/barrier/serial_hardware.py.
+  # "<02>" nghĩa là 1 byte 0x02 (không phải 4 ký tự chữ), xem _encode_command().
+  barriers:
+    "1": {port: "COM19", open_command: "3T00C000", close_command: "3T00C001"}
+    "2": {port: "TCP:192.168.1.5:2000", open_command: "<02>RYA<02>", close_command: "3T000020"}
+    "3": {port: "COM23", open_command: "3T000031", close_command: "3T000030"}
+
+capacity:
+  # Sức chứa tối đa theo loại xe — dùng cho Hướng B (đếm theo luồng vào/ra).
+  OTO: 20
+  XeMay: 150
+  XeDap: 10
+  XeBaGac: 5
+
+fee_schedule:
+  # Mô phỏng lại ý tưởng TblBieuPhi của phần mềm cũ (nhiều mốc giá theo khung giờ).
+  # Đây là ví dụ, PHẢI thay bằng biểu phí thật.
+  XeMay:
+    - {start: "00:00", end: "24:00", first_hour: 3000, next_hour: 2000}
+  OTO:
+    - {start: "00:00", end: "24:00", first_hour: 10000, next_hour: 5000}
+
+auth:
+  token_ttl_hours: 12
+
+timezone_offset_hours: 7   # DB lưu UTC; báo cáo PDF hiển thị theo giờ Việt Nam
+
+email:
+  # Tự gửi PDF báo cáo cho quản lý khi bảo vệ bấm "Kết ca". Đặt enabled: true và điền đủ thông tin.
+  # Mật khẩu SMTP nên đặt qua biến môi trường SMTP_PASSWORD (Gmail: dùng "App password", không dùng mật khẩu chính).
+  enabled: false
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 587
+  security: "starttls"      # starttls | ssl | none
+  username: "bai-xe@example.com"
+  from: "bai-xe@example.com"
+  recipients: ["quanly@example.com"]

@@ -1,0 +1,7 @@
+# Cài riêng trên máy Windows chạy scripts/windows_hardware_agent.py — KHÔNG cần
+# (và không nên) cài trong image Docker (xem Dockerfile, requirements.txt).
+# Cài bằng: pip install -r requirements-windows-agent.txt
+keyboard==0.13.5
+pyserial==3.5
+requests==2.34.2
+PyYAML==6.0.3

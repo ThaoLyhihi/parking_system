@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=parking
+      - POSTGRES_PASSWORD=parking
+      - POSTGRES_DB=parking
+    volumes:
+      - parking-db:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parking"]
+      interval: 5s
+      retries: 10
+
+  parking-ai:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./config/config.yaml:/app/config/config.yaml:ro   # copy từ config.example.yaml rồi sửa theo bãi xe thật
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PARKING_ADMIN_USER=admin
+      - PARKING_ADMIN_PASSWORD=${PARKING_ADMIN_PASSWORD:?đặt PARKING_ADMIN_PASSWORD trong file .env}
+      - AGENT_API_KEY=${AGENT_API_KEY:?đặt AGENT_API_KEY trong file .env}
+      - DATABASE_URL=postgresql+psycopg2://parking:parking@db:5432/parking
+    # Chủ ý KHÔNG có "devices:" ở đây — đầu đọc thẻ USB và barie qua COM chạy trên
+    # Windows thì không xuyên được vào container qua Docker Desktop/WSL2 một cách
+    # đơn giản. Phần đó chạy bằng scripts/windows_hardware_agent.py NGAY TRÊN WINDOWS,
+    # gọi HTTP vào service này — xem README mục "Triển khai trên Windows".
+    restart: unless-stopped
+
+volumes:
+  parking-db:

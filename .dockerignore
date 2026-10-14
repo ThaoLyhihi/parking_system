@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+parking.db
+config/config.yaml
+.git/
+.env
+build/
+dist/
+*.spec

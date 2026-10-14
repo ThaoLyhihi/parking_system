@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bãi giữ xe</title>
+<style>
+  :root { --bg:#f4f6f9; --card:#fff; --fg:#1b2430; --muted:#667085; --accent:#1d5fd1; --bad:#c0392b; --line:#dde3ea; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12161c; --card:#1b222b; --fg:#e8edf3; --muted:#93a1b3; --accent:#5b9bff; --bad:#ff7b6b; --line:#2c3642; } }
+  * { box-sizing:border-box } body { margin:0; font:15px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--fg) }
+  main { max-width:880px; margin:0 auto; padding:16px }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px }
+  h1 { font-size:20px; margin:0 0 12px } h2 { font-size:16px; margin:0 0 10px }
+  input,select,button { font:inherit; padding:8px 10px; border-radius:6px; border:1px solid var(--line); background:var(--bg); color:var(--fg) }
+  button { background:var(--accent); color:#fff; border:0; cursor:pointer } button.sec { background:transparent; color:var(--accent); border:1px solid var(--accent) }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center } .row>input { flex:1; min-width:140px }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px }
+  .stat { border:1px solid var(--line); border-radius:8px; padding:10px } .stat b { display:block; font-size:24px } .stat span { color:var(--muted); font-size:13px }
+  table { width:100%; border-collapse:collapse } th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line) } td.n,th.n { text-align:right }
+  #msg { min-height:1.4em } .err { color:var(--bad) } .hidden { display:none }
+  .tabs { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:12px } .tabs button { background:transparent; color:var(--fg); border:1px solid var(--line) } .tabs button.on { background:var(--accent); color:#fff; border-color:var(--accent) }
+  .form { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin:10px 0 }
+  .form label { display:flex; flex-direction:column; font-size:13px; color:var(--muted); gap:2px } .form label.chk { flex-direction:row; align-items:center; gap:6px }
+  .form input[type=text],.form input[type=number],.form input[type=date],.form input[type=password],.form select,.form textarea { width:100%; color:var(--fg) }
+  .form textarea { font:13px monospace; min-height:90px; padding:8px; border:1px solid var(--line); border-radius:6px; background:var(--bg) }
+  .scroll { overflow-x:auto } .note { color:var(--muted); font-size:13px } .ok { color:#1e8e3e }
+  .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:middle }
+  .dot.ok { background:#2e9e5b } .dot.bad { background:var(--bad) }
+  .healthrow { display:flex; gap:18px; flex-wrap:wrap; margin-top:10px; font-size:13px; color:var(--muted) }
+</style>
+</head>
+<body>
+<main>
+  <div class="top"><h1 id="title">Bãi giữ xe</h1><div class="row"><span id="who"></span><button class="sec hidden" id="logout">Đăng xuất</button></div></div>
+
+  <section class="card" id="login">
+    <h2>Đăng nhập</h2>
+    <form class="row" id="loginForm">
+      <input id="u" placeholder="Tên đăng nhập" autocomplete="username" required>
+      <input id="p" type="password" placeholder="Mật khẩu" autocomplete="current-password" required>
+      <button>Đăng nhập</button>
+    </form>
+  </section>
+
+  <div id="msg" role="status"></div>
+
+  <section class="hidden" id="guard">
+    <div class="card">
+      <h2>Quét thẻ xe</h2>
+      <form class="row" id="scanForm">
+        <input id="card" placeholder="Mã thẻ (đưa thẻ vào đầu đọc hoặc nhập tay)" autocomplete="off" required>
+        <select id="vt"><option value="XeMay">Xe máy</option><option value="OTO">Ô tô</option><option value="XeDap">Xe đạp</option></select>
+        <button>Quét</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Khách vào (không có thẻ)</h2>
+      <form class="row" id="visitorForm">
+        <select id="vvt"><option value="XeMay">Xe máy</option><option value="OTO">Ô tô</option><option value="XeDap">Xe đạp</option></select>
+        <button>Mở barie cho khách vào</button>
+      </form>
+      <table id="visitors" style="margin-top:10px"></table>
+    </div>
+    <div class="card">
+      <h2>Thống kê ca hiện tại</h2>
+      <div class="stats" id="stats"></div>
+      <table id="byType"></table>
+      <div class="row" style="margin-top:12px">
+        <button class="sec" id="refresh">Làm mới</button>
+        <button id="pdf">Xuất PDF gửi quản lý</button>
+        <button class="sec" id="close">Kết ca</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Biển số vào/ra <span style="font-weight:400;color:var(--muted);font-size:12px">(thời gian thực)</span></h2>
+      <table id="feed"></table>
+    </div>
+  </section>
+
+  <section class="hidden" id="admin">
+    <div class="card">
+      <h2>Tình trạng bãi xe <span style="font-weight:400;color:var(--muted);font-size:12px">(tự làm mới mỗi 5s)</span></h2>
+      <div class="stats" id="occStats"></div>
+      <div class="healthrow" id="health"></div>
+    </div>
+    <div class="card">
+      <h2>Biển số vào/ra <span style="font-weight:400;color:var(--muted);font-size:12px">(thời gian thực)</span></h2>
+      <table id="feedAdmin"></table>
+    </div>
+    <div class="tabs" id="tabs"></div>
+    <div id="pane"></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let token = null, role = null, shiftId = null, statusTimer = null;
+const money = v => v.toLocaleString("vi-VN") + " đ";
+const when = s => s ? new Date(s + "Z").toLocaleString("vi-VN") : "—";
+function say(t, bad) { $("msg").textContent = t || ""; $("msg").className = bad ? "err" : ""; }
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}), ...opts.headers } });
+  if (r.status === 401 && token) { show(null); throw new Error("Phiên đã hết hạn, hãy đăng nhập lại"); }
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  return r;
+}
+const json = async (p, o) => (await api(p, o)).json();
+const post = (p, body) => json(p, { method: "POST", body: JSON.stringify(body || {}) });
+
+function cell(tr, text, cls, tag = "td") { const c = document.createElement(tag); c.textContent = text; if (cls) c.className = cls; tr.append(c); return c; }
+function fill(tbl, head, rows) {
+  tbl.replaceChildren();
+  const h = tbl.insertRow(); head.forEach(([t, n]) => cell(h, t, n ? "n" : "", "th"));
+  rows.forEach(r => { const tr = tbl.insertRow(); r.forEach((v, i) => v instanceof Node ? tr.insertCell().append(v) : cell(tr, v, head[i][1] ? "n" : "")); });
+}
+
+function show(user) {
+  token = user ? token : null;
+  role = user && user.role;
+  $("login").classList.toggle("hidden", !!user);
+  $("guard").classList.toggle("hidden", role !== "guard");
+  $("admin").classList.toggle("hidden", role !== "admin");
+  $("logout").classList.toggle("hidden", !user);
+  $("who").textContent = user ? user.full_name : "";
+  $("title").textContent = role === "admin" ? "Quản lý bãi giữ xe" : "Bãi giữ xe";
+  if (!user && statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+  user ? connectFeed() : disconnectFeed();
+}
+
+// ---------------- Biển số vào/ra thời gian thực (WebSocket) ----------------
+let feedWs = null, feedRetry = null;
+function connectFeed() {
+  if (feedWs) return;
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  feedWs = new WebSocket(`${proto}//${location.host}/ws/events?token=${encodeURIComponent(token)}`);
+  feedWs.onmessage = ev => {
+    const d = JSON.parse(ev.data);
+    const row = [when(d.at), d.type === "entry" ? "VÀO" : "RA", d.vehicle_type, d.plate || "(chưa đọc được)",
+      d.card_number || "Khách", d.amount != null ? money(d.amount) : ""];
+    for (const id of ["feed", "feedAdmin"]) {
+      const t = $(id); if (!t) continue;
+      if (!t.rows.length) fill(t, [["Lúc"], ["Chiều"], ["Loại"], ["Biển số"], ["Thẻ"], ["Tiền", 1]], []);
+      const tr = t.insertRow(1); row.forEach((v, i) => cell(tr, v, i === 5 ? "n" : ""));
+      while (t.rows.length > 21) t.deleteRow(21);
+    }
+    if (role === "guard") loadVisitors();
+  };
+  feedWs.onclose = () => { feedWs = null; if (token) feedRetry = setTimeout(connectFeed, 3000); };
+}
+function disconnectFeed() {
+  clearTimeout(feedRetry); feedRetry = null;
+  if (feedWs) { feedWs.onclose = null; feedWs.close(); feedWs = null; }
+}
+
+async function loadStatus() {
+  try {
+    const s = await json("/status/overview");
+    $("occStats").replaceChildren(...Object.entries(s.occupancy).map(([type, v]) => {
+      const d = document.createElement("div"); d.className = "stat";
+      const b = document.createElement("b"); b.textContent = `${v.current} / ${v.capacity}`;
+      const sp = document.createElement("span"); sp.textContent = `${type} — còn trống ${v.vacant}`;
+      d.append(b, sp); return d;
+    }));
+    const dot = ok => `<span class="dot ${ok ? "ok" : "bad"}"></span>`;
+    const c = s.cameras;
+    const parts = [];
+    parts.push(c.gate_in_configured
+      ? dot(c.gate_in_connected) + "Camera cổng vào " + (c.gate_in_connected ? "đang kết nối" : "mất kết nối")
+      : "<span class=\"dot bad\"></span>Chưa cấu hình camera cổng vào");
+    parts.push(c.gate_out_shares_gate_in
+      ? "<span class=\"note\">(cổng ra dùng chung camera cổng vào — 1 làn)</span>"
+      : dot(c.gate_out_connected) + "Camera cổng ra " + (c.gate_out_connected ? "đang kết nối" : "mất kết nối"));
+    parts.push(c.barrier_configured
+      ? dot(c.barrier_connected) + "Camera barie " + (c.barrier_connected ? "đang kết nối" : "mất kết nối")
+      : "<span class=\"dot bad\"></span>Chưa cấu hình camera barie");
+    parts.push(s.barrier.configured
+      ? dot(s.barrier.safe_to_close) + "Vùng an toàn barie: " + (s.barrier.safe_to_close ? "trống, an toàn" : "có vật cản / đang chờ")
+      : "<span class=\"dot bad\"></span>Chưa có camera giám sát vùng an toàn barie");
+    $("health").innerHTML = parts.join("&nbsp;&nbsp;&nbsp;");
+  } catch (err) { say(err.message, true); }
+}
+
+$("loginForm").onsubmit = async e => {
+  e.preventDefault(); say();
+  try {
+    const d = await post("/auth/login", { username: $("u").value, password: $("p").value });
+    token = d.token; shiftId = d.shift_id; $("p").value = "";
+    show(d); d.role === "admin" ? loadAdmin() : loadShift();
+  } catch (err) { say(err.message, true); }
+};
+$("logout").onclick = async () => { try { await post("/auth/logout"); } catch {} show(null); say(); };
+
+async function loadShift() {
+  try {
+    const s = await json("/shift/current"); shiftId = s.shift_id;
+    $("stats").replaceChildren(...[["Xe vào", s.vehicles_in], ["Xe ra", s.vehicles_out], ["Xe còn tồn", s.vehicles_remaining], ["Tiền thu ca", money(s.total_amount)]].map(([k, v]) => {
+      const d = document.createElement("div"); d.className = "stat"; const b = document.createElement("b"); b.textContent = v; const sp = document.createElement("span"); sp.textContent = k; d.append(b, sp); return d; }));
+    fill($("byType"), [["Loại xe"], ["Vào", 1], ["Ra", 1], ["Tồn", 1], ["Tiền", 1]], s.by_type.map(r => [r.type, r.in, r.out, r.remaining, money(r.amount)]));
+  } catch (err) { say(err.message, true); }
+  loadVisitors();
+}
+async function loadVisitors() {
+  try {
+    const list = await json("/visitor/open");
+    fill($("visitors"), [["Loại xe"], ["Biển số"], ["Vào lúc"], [""]], list.map(v => [v.vehicle_type, v.plate_in || "(chưa đọc được)", when(v.time_in),
+      btn("Cho ra", async () => { try { const r = await post(`/visitor/${v.session_id}/exit`); say(`Khách ra — biển số: ${r.plate_text || "(chưa đọc được)"} — thu ${money(r.amount)}`); loadShift(); } catch (e) { say(e.message, true); } })]));
+  } catch (err) { say(err.message, true); }
+}
+$("visitorForm").onsubmit = async e => {
+  e.preventDefault(); say();
+  try {
+    const d = await post("/visitor/entry", { vehicle_type: $("vvt").value });
+    say(`Đã mở barie cho khách vào — biển số: ${d.plate_text || "(chưa đọc được)"}`);
+    loadVisitors();
+  } catch (err) { say(err.message, true); }
+};
+$("refresh").onclick = loadShift;
+$("scanForm").onsubmit = async e => {
+  e.preventDefault(); say();
+  try {
+    const d = await post("/card/scan", { card_number: $("card").value.trim(), vehicle_type: $("vt").value });
+    say((d.action === "entry" ? `Xe VÀO — biển số: ${d.plate_text || "(chưa đọc được)"}` : `Xe RA — biển số: ${d.plate_text || "(chưa đọc được)"} — thu ${money(d.amount)}`) + (d.message ? " ⚠ " + d.message : ""), !!d.message);
+    $("card").value = ""; $("card").focus(); loadShift();
+  } catch (err) { say(err.message, true); }
+};
+async function download(id) {
+  const blob = await (await api(`/shift/${id}/report.pdf`)).blob();
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `bao-cao-ca-${id}.pdf`; a.click(); URL.revokeObjectURL(a.href);
+}
+$("pdf").onclick = () => download(shiftId).catch(err => say(err.message, true));
+$("close").onclick = async () => {
+  if (!confirm("Kết ca? Sau khi kết ca bạn sẽ không còn ca đang mở (đăng nhập lại để mở ca mới).")) return;
+  try { const s = await post("/shift/close"); await download(s.shift_id); show(null); say("Đã kết ca và tải báo cáo PDF." + (s.email_queued ? " Báo cáo đang được gửi email cho quản lý." : " (Email chưa được cấu hình — hãy gửi PDF thủ công.)")); } catch (err) { say(err.message, true); }
+};
+
+// ================= Quản trị: Ca & tài khoản / Thẻ lượt / Thẻ tháng / Loại xe / Biểu phí / Cài đặt =================
+const TABS = [["ops", "Ca & tài khoản"], ["daily", "Thẻ lượt"], ["monthly", "Thẻ tháng"], ["types", "Loại xe/thẻ"], ["tariffs", "Biểu phí"], ["revenue", "Doanh thu vé tháng"], ["settings", "Cài đặt"]];
+let tab = "ops", typesCache = [], cardQ = "", cardOffset = 0;
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) k.startsWith("on") ? e[k] = v : k === "class" ? e.className = v : e.setAttribute(k, v);
+  e.append(...kids.flat().filter(x => x != null)); return e;
+}
+const btn = (text, fn, sec = true) => el("button", { class: sec ? "sec" : "", type: "button", onclick: fn }, text);
+const guarded = fn => async (...a) => { try { say(); await fn(...a); } catch (e) { say(e.message, true); } };
+const pane = () => $("pane");
+const yn = v => v ? "✓" : "";
+
+function loadAdmin() {
+  loadStatus();
+  if (!statusTimer) statusTimer = setInterval(loadStatus, 5000);
+  $("tabs").replaceChildren(...TABS.map(([k, t]) => el("button", { class: k === tab ? "on" : "", onclick: () => { tab = k; loadAdmin(); } }, t)));
+  pane().replaceChildren();
+  ({ ops: tabOps, daily: () => tabCards("daily"), monthly: () => tabCards("monthly"), types: tabTypes, tariffs: tabTariffs, revenue: tabRevenue, settings: tabSettings })[tab]().catch(e => say(e.message, true));
+}
+
+// Form sinh từ danh sách trường {key,label,type:text|number|date|bool|select|textarea|password,options,req,emptyNull}
+function buildForm(fields, values, onSave, saveText = "Lưu", extra = []) {
+  const inputs = {};
+  const form = el("form", { class: "form" });
+  for (const f of fields) {
+    let inp;
+    if (f.type === "select") inp = el("select", {}, f.options.map(o => el("option", { value: o[0] ?? o }, o[1] ?? o)));
+    else if (f.type === "textarea") inp = el("textarea");
+    else inp = el("input", { type: f.type === "bool" ? "checkbox" : (f.type || "text"), ...(f.step ? { step: f.step } : {}) });
+    if (f.req) inp.required = true;
+    const v = values[f.key];
+    if (f.type === "bool") inp.checked = !!v; else inp.value = v ?? "";
+    inputs[f.key] = inp;
+    form.append(el("label", { class: f.type === "bool" ? "chk" : "" }, f.type === "bool" ? [inp, f.label] : [f.label, inp]));
+  }
+  const get = () => Object.fromEntries(fields.map(f => {
+    const i = inputs[f.key]; let v = f.type === "bool" ? i.checked : i.value;
+    if (f.type === "number") v = v === "" ? null : Number(v);
+    else if (v === "" && (f.type === "date" || f.emptyNull)) v = null;
+    return [f.key, v];
+  }));
+  form.onsubmit = guarded(async e => { e.preventDefault(); await onSave(get()); });
+  form.append(el("div", { class: "row" }, el("button", {}, saveText), extra));
+  return form;
+}
+const closeBtn = () => btn("Đóng", () => $("editor").replaceChildren());
+const editorCard = (title, form) => { $("editor").replaceChildren(el("div", { class: "card" }, el("h2", {}, title), form)); $("editor").scrollIntoView(); };
+
+// ---------- Ca & tài khoản ----------
+async function tabOps() {
+  const [users, shifts] = await Promise.all([json("/admin/users"), json("/admin/shifts")]);
+  const ut = el("table"), st = el("table");
+  fill(ut, [["Tên đăng nhập"], ["Họ tên"], ["Quyền"], ["Trạng thái"], [""]], users.map(u => [u.username, u.full_name, u.role === "admin" ? "Quản lý" : "Bảo vệ", u.is_active ? "Hoạt động" : "Đã khoá",
+    btn(u.is_active ? "Khoá" : "Mở khoá", guarded(async () => { await json(`/admin/users/${u.id}`, { method: "PATCH", body: JSON.stringify({ is_active: !u.is_active }) }); loadAdmin(); }))]));
+  fill(st, [["Ca"], ["Bảo vệ"], ["Bắt đầu"], ["Vào", 1], ["Ra", 1], ["Tiền", 1], [""]], shifts.map(s => ["#" + s.shift_id + (s.status === "open" ? " (đang mở)" : ""), s.guard, when(s.started_at), s.vehicles_in, s.vehicles_out, money(s.total_amount),
+    btn("PDF", guarded(() => download(s.shift_id)))]));
+  const f = buildForm([{ key: "username", label: "Tên đăng nhập", req: 1 }, { key: "full_name", label: "Họ tên", req: 1 }, { key: "password", label: "Mật khẩu (≥ 8 ký tự)", type: "password", req: 1 },
+    { key: "role", label: "Quyền", type: "select", options: [["guard", "Bảo vệ"], ["admin", "Quản lý"]] }], { role: "guard" },
+    async v => { await post("/admin/users", v); loadAdmin(); }, "Thêm tài khoản");
+  pane().append(el("div", { class: "card" }, el("h2", {}, "Tài khoản"), el("div", { class: "scroll" }, ut), el("h2", {}, "Thêm tài khoản"), f),
+    el("div", { class: "card" }, el("h2", {}, "Các ca gần đây"), el("div", { class: "scroll" }, st)));
+}
+
+// ---------- Thẻ lượt / thẻ tháng ----------
+async function tabCards(kind) {
+  typesCache = await json("/admin/vehicle-types");
+  const monthly = kind === "monthly";
+  const types = typesCache.filter(t => t.is_monthly_pass === monthly && t.is_active);
+  const data = await json("/admin/cards?" + new URLSearchParams({ kind, limit: 50, offset: cardOffset, ...(cardQ ? { q: cardQ } : {}) }));
+  const search = el("input", { type: "text", placeholder: "Tìm mã thẻ, số thẻ, biển số, chủ xe, phòng…", value: cardQ });
+  const searchRow = el("form", { class: "row", onsubmit: e => { e.preventDefault(); cardQ = search.value.trim(); cardOffset = 0; loadAdmin(); } }, search, el("button", {}, "Tìm"));
+  const t = el("table"), today = new Date().toISOString().slice(0, 10);
+  const head = [["Mã thẻ"], ["Số thẻ"], ["Loại"], ["Biển số"], ["Chủ xe"], ["Phòng"]].concat(monthly ? [["Hết hạn"]] : [], [["Trạng thái"], [""]]);
+  fill(t, head, data.items.map(c => [c.card_number, c.label || "", c.type_name, c.plate_number || "", c.owner_name || "", c.room_number || ""]
+    .concat(monthly ? [c.expire_date ? c.expire_date + (c.expire_date < today ? " (hết hạn)" : "") : "—"] : [], [c.status === "active" ? "Hoạt động" : "Đã khoá",
+      el("span", { class: "row" }, btn("Sửa", () => cardEditor(c, types, monthly)), monthly ? btn("Gia hạn", () => renewDialog(c)) : null,
+        btn(c.status === "active" ? "Khoá" : "Mở", guarded(async () => { await json(`/admin/cards/${c.id}`, { method: "PUT", body: JSON.stringify({ ...c, status: c.status === "active" ? "locked" : "active" }) }); loadAdmin(); })),
+        btn("Xoá", guarded(async () => { if (confirm("Xoá thẻ " + c.card_number + "?")) { await api(`/admin/cards/${c.id}`, { method: "DELETE" }); loadAdmin(); } })))])));
+  const pager = el("div", { class: "row" }, el("span", { class: "note" }, `${data.total} thẻ`),
+    cardOffset > 0 ? btn("« Trước", () => { cardOffset = Math.max(cardOffset - 50, 0); loadAdmin(); }) : null,
+    cardOffset + 50 < data.total ? btn("Sau »", () => { cardOffset += 50; loadAdmin(); }) : null,
+    btn(monthly ? "+ Thêm thẻ tháng" : "+ Thêm thẻ lượt", () => cardEditor(null, types, monthly), false));
+  pane().replaceChildren(el("div", { class: "card" }, el("h2", {}, monthly ? "Thẻ tháng" : "Thẻ lượt"), searchRow, el("div", { class: "scroll" }, t), pager), el("div", { id: "editor" }));
+}
+function cardEditor(c, types, monthly) {
+  const fields = [{ key: "card_number", label: "Mã thẻ (mã quét được)", req: 1 }, { key: "label", label: "Số in trên thẻ", emptyNull: 1 },
+    { key: "vehicle_type_code", label: "Loại thẻ", type: "select", options: types.map(t => [t.code, t.display_name]) },
+    { key: "plate_number", label: "Biển số", emptyNull: 1 }, { key: "owner_name", label: "Chủ xe", emptyNull: 1 }, { key: "room_number", label: "Số phòng", emptyNull: 1 }, { key: "description", label: "Mô tả xe", emptyNull: 1 }]
+    .concat(monthly ? [{ key: "start_date", label: "Ngày bắt đầu", type: "date", req: 1 }, { key: "expire_date", label: "Ngày hết hạn", type: "date", req: 1 }, { key: "remaining_uses", label: "Số lượt còn lại (trống = không giới hạn)", type: "number" }] : []);
+  const init = c || { vehicle_type_code: types[0]?.code, status: "active" };
+  editorCard(c ? "Sửa thẻ " + c.card_number : "Thêm thẻ", buildForm(fields, init, async v => {
+    await json(c ? `/admin/cards/${c.id}` : "/admin/cards", { method: c ? "PUT" : "POST", body: JSON.stringify({ ...v, status: init.status || "active" }) }); loadAdmin();
+  }, c ? "Lưu thay đổi" : "Thêm thẻ", closeBtn()));
+}
+function renewDialog(c) {
+  const vt = typesCache.find(t => t.code === c.vehicle_type_code);
+  const form = buildForm([{ key: "months", label: "Số tháng gia hạn", type: "number", req: 1 }, { key: "amount", label: `Số tiền (trống = ${money(vt?.monthly_fee || 0)} × số tháng)`, type: "number" }],
+    { months: 1 }, async v => { const r = await post(`/admin/cards/${c.id}/renew`, { months: v.months, ...(v.amount != null ? { amount: v.amount } : {}) });
+      await loadAdmin(); say(`Đã gia hạn thẻ ${c.card_number} đến ${r.card.expire_date}, thu ${money(r.amount)}`); }, "Gia hạn", closeBtn());
+  const hist = el("div", { class: "note" }, "Đang tải lịch sử đóng tiền…");
+  json(`/admin/cards/${c.id}/payments`).then(ps => hist.textContent = ps.length ? "Lịch sử: " + ps.map(p => `${when(p.paid_at)} ${money(p.amount)} (đến ${p.period_end})`).join("; ") : "Chưa có lần đóng tiền nào.");
+  editorCard(`Gia hạn thẻ ${c.card_number} — ${c.owner_name || ""} (hết hạn ${c.expire_date || "—"})`, el("div", {}, form, hist));
+}
+
+// ---------- Loại xe/thẻ ----------
+async function tabTypes() {
+  const types = typesCache = await json("/admin/vehicle-types");
+  const t = el("table");
+  fill(t, [["Mã"], ["Tên"], ["Vé tháng"], ["Giá/tháng", 1], ["Sức chứa", 1], ["LPR vào"], ["LPR ra"], ["Barie vào/ra"], ["Dùng"], [""]],
+    types.map(v => [v.code, v.display_name, yn(v.is_monthly_pass), v.is_monthly_pass ? money(v.monthly_fee) : "", v.capacity || "", yn(v.lpr_in_enabled), yn(v.lpr_out_enabled), v.barrier_in_id + " / " + v.barrier_out_id, yn(v.is_active),
+      el("span", { class: "row" }, btn("Sửa", () => typeEditor(v)), btn("Xoá", guarded(async () => { if (confirm("Xoá loại " + v.code + "?")) { await api(`/admin/vehicle-types/${v.id}`, { method: "DELETE" }); loadAdmin(); } })))]));
+  pane().replaceChildren(el("div", { class: "card" }, el("h2", {}, "Loại xe / loại thẻ"), el("div", { class: "scroll" }, t),
+    el("p", { class: "note" }, "Mỗi loại có cấu hình riêng: nhận diện biển số (LPR) lúc vào/ra, barie sử dụng, giá vé tháng, sức chứa."), btn("+ Thêm loại", () => typeEditor(null), false)), el("div", { id: "editor" }));
+}
+function typeEditor(v) {
+  const fields = [{ key: "code", label: "Mã (chữ/số/_, không đổi được sau khi tạo)", req: 1 }, { key: "display_name", label: "Tên hiển thị", req: 1 }, { key: "is_monthly_pass", label: "Là vé tháng", type: "bool" },
+    { key: "monthly_fee", label: "Giá 1 tháng (đ)", type: "number" }, { key: "max_uses", label: "Số lượt tối đa (trống = không giới hạn)", type: "number" }, { key: "expiry_warning_days", label: "Báo sắp hết hạn trước (ngày)", type: "number" },
+    { key: "capacity", label: "Sức chứa (chỗ)", type: "number" }, { key: "lpr_in_enabled", label: "Nhận diện biển số lúc vào", type: "bool" }, { key: "lpr_out_enabled", label: "Nhận diện biển số lúc ra", type: "bool" },
+    { key: "lpr_confirm_on_match", label: "Tự xác nhận khi biển số khớp", type: "bool" }, { key: "barrier_in_id", label: "Barie lúc vào (id)" }, { key: "barrier_out_id", label: "Barie lúc ra (id)" }, { key: "is_active", label: "Đang sử dụng", type: "bool" }];
+  const init = v || { monthly_fee: 0, expiry_warning_days: 5, capacity: 0, lpr_in_enabled: true, lpr_out_enabled: true, lpr_confirm_on_match: true, barrier_in_id: "1", barrier_out_id: "1", is_active: true };
+  editorCard(v ? "Sửa loại " + v.code : "Thêm loại", buildForm(fields, init,
+    async b => { await json(v ? `/admin/vehicle-types/${v.id}` : "/admin/vehicle-types", { method: v ? "PUT" : "POST", body: JSON.stringify(b) }); loadAdmin(); }, "Lưu", closeBtn()));
+  if (v) document.querySelector("#editor input").readOnly = true;
+}
+
+// ---------- Biểu phí ----------
+async function tabTariffs() {
+  const [tariffs, types] = await Promise.all([json("/admin/tariffs"), json("/admin/vehicle-types")]); typesCache = types;
+  const name = c => types.find(t => t.code === c)?.display_name || c;
+  const t = el("table");
+  fill(t, [["Loại xe"], ["Khung giờ vào"], ["Cách tính"], ["Giá đầu", 1], ["Giá tiếp", 1], ["Trần/ngày", 1], ["Phụ thu đêm", 1], ["Dùng"], [""]],
+    tariffs.map(x => [name(x.vehicle_type_code) + (x.name ? " — " + x.name : ""), `${x.start_time}–${x.end_time}`, x.mode === "flat" ? "Đồng giá/lượt" : `Theo block ${x.block_minutes}′`, money(x.first_fee), x.mode === "flat" ? "" : money(x.next_fee),
+      x.max_fee_per_day ? money(x.max_fee_per_day) : "", x.overnight_fee ? money(x.overnight_fee) : "", yn(x.is_active),
+      el("span", { class: "row" }, btn("Sửa", () => tariffEditor(x, types)), btn("Xoá", guarded(async () => { if (confirm("Xoá biểu phí này?")) { await api(`/admin/tariffs/${x.id}`, { method: "DELETE" }); loadAdmin(); } })))]));
+  const pv = el("div", { class: "note" });
+  const pvForm = buildForm([{ key: "vehicle_type", label: "Loại xe", type: "select", options: types.map(v => [v.code, v.display_name]) }, { key: "hour_in", label: "Giờ vào (0-23)", type: "number" }, { key: "hours", label: "Gửi bao nhiêu giờ", type: "number", step: "0.5" }],
+    { hour_in: 9, hours: 2 }, async v => { const r = await json("/admin/tariffs/preview?" + new URLSearchParams(v)); pv.textContent = "Phí: " + money(r.amount); pv.className = "ok"; }, "Tính thử");
+  pane().replaceChildren(el("div", { class: "card" }, el("h2", {}, "Biểu phí"), el("div", { class: "scroll" }, t),
+    el("p", { class: "note" }, "Mỗi dòng là 1 khung giờ của 1 loại xe, chọn theo giờ VÀO. Vé tháng không thu phí lượt. Loại xe chưa có biểu phí sẽ dùng fee_schedule trong config.yaml."),
+    btn("+ Thêm biểu phí", () => tariffEditor(null, types), false)), el("div", { id: "editor" }), el("div", { class: "card" }, el("h2", {}, "Tính thử phí"), pvForm, pv));
+}
+function tariffEditor(x, types) {
+  const fields = [{ key: "vehicle_type_code", label: "Loại xe", type: "select", options: types.map(v => [v.code, v.display_name]) }, { key: "name", label: "Tên khung (vd: Ban ngày)" },
+    { key: "start_time", label: "Từ giờ (HH:MM)" }, { key: "end_time", label: "Đến giờ (HH:MM, 24:00 = hết ngày)" },
+    { key: "mode", label: "Cách tính", type: "select", options: [["flat", "Đồng giá mỗi lượt"], ["block", "Theo block thời gian"]] },
+    { key: "first_fee", label: "Giá lượt / block đầu (đ)", type: "number" }, { key: "next_fee", label: "Giá mỗi block tiếp theo (đ)", type: "number" }, { key: "block_minutes", label: "Độ dài block (phút)", type: "number" },
+    { key: "max_fee_per_day", label: "Trần phí mỗi 24h (đ, trống = không trần)", type: "number" }, { key: "overnight_fee", label: "Phụ thu mỗi đêm qua 00:00 (đ)", type: "number" }, { key: "is_active", label: "Đang áp dụng", type: "bool" }];
+  const init = x || { vehicle_type_code: types[0]?.code, name: "Mặc định", start_time: "00:00", end_time: "24:00", mode: "flat", first_fee: 0, next_fee: 0, block_minutes: 60, overnight_fee: 0, is_active: true };
+  editorCard(x ? "Sửa biểu phí" : "Thêm biểu phí", buildForm(fields, init,
+    async b => { await json(x ? `/admin/tariffs/${x.id}` : "/admin/tariffs", { method: x ? "PUT" : "POST", body: JSON.stringify(b) }); loadAdmin(); }, "Lưu", closeBtn()));
+}
+
+// ---------- Doanh thu vé tháng ----------
+async function tabRevenue() {
+  const year = new Date().getFullYear();
+  const rows = await json("/admin/monthly-revenue?year=" + year);
+  const t = el("table");
+  const names = ["", "Th1", "Th2", "Th3", "Th4", "Th5", "Th6", "Th7", "Th8", "Th9", "Th10", "Th11", "Th12"];
+  fill(t, [["Tháng"], ["Số lượt đóng/gia hạn", 1], ["Tổng thu", 1]], rows.map(r => [names[r.month], r.count, money(r.amount)]));
+  const total = rows.reduce((s, r) => s + r.amount, 0);
+  pane().replaceChildren(el("div", { class: "card" }, el("h2", {}, `Doanh thu vé tháng năm ${year}`),
+    el("div", { class: "scroll" }, t), el("p", { class: "note" }, `Tổng năm ${year}: ${money(total)}. Đây là tiền thu khi tạo/gia hạn vé tháng, tách riêng khỏi tiền thu theo lượt trong báo cáo ca.`)));
+}
+
+// ---------- Cài đặt ----------
+async function tabSettings() {
+  const all = await json("/admin/settings");
+  const cards = Object.entries(all).map(([sec, def]) => {
+    const fields = def.fields.map(f => ({ key: f.key, label: f.label + (f.restart ? " ⟳" : ""),
+      type: f.type === "bool" ? "bool" : f.type === "int" || f.type === "float" ? "number" : f.type === "select" ? "select" : f.type === "secret" ? "password" : f.type === "json" ? "textarea" : "text",
+      options: f.options, step: f.type === "float" ? "any" : undefined }));
+    const vals = Object.fromEntries(def.fields.map(f => [f.key, f.type === "json" ? JSON.stringify(def.values[f.key], null, 2) : f.type === "list" ? (def.values[f.key] || []).join(", ") : def.values[f.key]]));
+    const saveMsg = el("span", { class: "note" });
+    return el("div", { class: "card" }, el("h2", {}, def.title),
+      def.note ? el("p", { class: "note" }, def.note) : null,
+      buildForm(fields, vals, async v => {
+        const r = await json(`/admin/settings/${sec}`, { method: "PUT", body: JSON.stringify(v) });
+        saveMsg.textContent = r.restart_required ? "Đã lưu — cần khởi động lại AI service/agent để áp dụng." : "Đã lưu, áp dụng ngay."; saveMsg.className = "ok";
+      }, "Lưu", saveMsg));
+  });
+  pane().replaceChildren(el("p", { class: "note" }, "⟳ = cần khởi động lại AI service (hoặc hardware agent) mới có hiệu lực."), ...cards);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+# Core
+opencv-python-headless==5.0.0.93
+onnxruntime==1.31.0
+numpy==2.5.4
+SQLAlchemy==2.1.4
+PyYAML==6.0.3
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+reportlab==5.0.1
+requests>=2.31
+
+# Phần cứng: đầu đọc thẻ USB (HID keyboard-wedge, chỉ chạy đúng trên Linux) + barie qua COM/TCP
+evdev==2.0.0
+pyserial==3.5
+
+# Database: PostgreSQL (gói chung qua Docker Compose, xem docker-compose.yml service "db")
+psycopg2-binary==2.9.13
+
+# Dev / test
+pytest==9.1.1
+httpx==0.28.1
+
+# CHƯA có trong file này (cài khi cần, xem app/alpr/ocr.py và mục 1e trong
+# QUY_TRINH_LAM_LAI_PHAN_MEM.md):
+#   - torch + ultralytics, nếu muốn load trực tiếp model .pt thay vì .onnx
+#   - easyocr / paddleocr, khi đã khảo sát xong và chọn được hướng OCR cho biển 2 dòng

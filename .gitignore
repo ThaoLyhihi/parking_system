@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+parking.db
+config/config.yaml
+.pytest_cache/
+.env
+# Artifact từ scripts/build_agent_exe.bat (PyInstaller) — build lại được, không cần commit.
+build/
+dist/
+*.spec
