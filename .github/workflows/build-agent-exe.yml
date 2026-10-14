@@ -1,0 +1,30 @@
+name: Build Windows agent exe
+
+# Chạy tay: tab Actions -> "Build Windows agent exe" -> Run workflow.
+# Tự chạy khi push tag dạng v* (vd v1.0).
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cài thư viện
+        run: pip install -r requirements-windows-agent.txt pyinstaller
+      - name: Đóng gói exe
+        run: pyinstaller --onefile --name parking_hardware_agent --paths . --hidden-import keyboard._winkeyboard --clean --noconfirm scripts/windows_hardware_agent.py
+      - name: Chuẩn bị thư mục dist
+        shell: bash
+        run: |
+          mkdir -p dist/config
+          cp config/config.example.yaml dist/config/config.example.yaml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parking_hardware_agent-windows
+          path: dist/
