@@ -353,3 +353,79 @@ def test_build_card_reader_serial_requires_port():
         build_card_reader({"type": "serial"})
     reader = build_card_reader({"type": "serial", "port": "COM7"})
     assert reader.port == "COM7"
+
+
+class _FakeCamera:
+    def read(self):
+        return np.zeros((10, 10, 3), dtype=np.uint8)
+
+
+def test_face_verification_disabled_by_default_does_not_touch_session(monkeypatch, tmp_path):
+    """Tính năng tắt theo mặc định -> không gọi model, không ghi embedding, không
+    phát sinh cảnh báo gì — hành vi quẹt thẻ y hệt như trước khi có tính năng này."""
+    import app.api.main as m
+
+    c = _fresh_client(monkeypatch, tmp_path)
+    guard = _login(c, "bv1", "guardpass123")
+    monkeypatch.setattr(m, "_gate_in_camera", _FakeCamera())
+
+    def _boom(*a, **kw):
+        raise AssertionError("không được gọi model khuôn mặt khi tính năng đang tắt")
+    monkeypatch.setattr(m.face_verify, "extract_embedding", _boom)
+
+    r = c.post("/card/scan", headers=guard, json={"card_number": "F1"})
+    assert r.status_code == 200 and r.json()["message"] is None
+
+
+def test_face_verification_warns_on_mismatch_but_still_opens_barrier(monkeypatch, tmp_path):
+    """Khi bật tính năng: lúc vào lưu embedding, lúc ra so khớp — nếu không khớp
+    chỉ thêm cảnh báo cho bảo vệ (giống cảnh báo lệch biển số), TUYỆT ĐỐI không
+    được chặn giao dịch/mở barie."""
+    import app.api.main as m
+    from app import settings as app_settings
+    from app.db.base import get_session
+
+    c = _fresh_client(monkeypatch, tmp_path)
+    guard = _login(c, "bv1", "guardpass123")
+    db = get_session()
+    app_settings.save_section(db, "face_verification", {"enabled": True})
+    db.close()
+    monkeypatch.setattr(m, "_gate_in_camera", _FakeCamera())
+
+    embeddings = iter([[1.0, 0.0], [0.0, 1.0]])  # vào/ra khác hẳn nhau -> không khớp
+    monkeypatch.setattr(m.face_verify, "extract_embedding", lambda *a, **kw: next(embeddings))
+
+    r_in = c.post("/card/scan", headers=guard, json={"card_number": "F2"})
+    assert r_in.status_code == 200 and r_in.json()["action"] == "entry"
+
+    r_out = c.post("/card/scan", headers=guard, json={"card_number": "F2"})
+    assert r_out.status_code == 200 and r_out.json()["action"] == "exit"
+    assert "không khớp" in r_out.json()["message"]
+    assert c.get("/barrier/2/pending-open", headers={"X-Agent-Key": "k-test"}).json() == {"open": True}
+
+
+def test_face_verification_matches_without_warning(monkeypatch, tmp_path):
+    import app.api.main as m
+    from app import settings as app_settings
+    from app.db.base import get_session
+
+    c = _fresh_client(monkeypatch, tmp_path)
+    guard = _login(c, "bv1", "guardpass123")
+    db = get_session()
+    app_settings.save_section(db, "face_verification", {"enabled": True})
+    db.close()
+    monkeypatch.setattr(m, "_gate_in_camera", _FakeCamera())
+    monkeypatch.setattr(m.face_verify, "extract_embedding", lambda *a, **kw: [1.0, 0.0])
+
+    c.post("/card/scan", headers=guard, json={"card_number": "F3"})
+    r_out = c.post("/card/scan", headers=guard, json={"card_number": "F3"})
+    assert r_out.json()["action"] == "exit" and r_out.json()["message"] is None
+
+
+def test_face_compare_embeddings_threshold():
+    from app.face.verify import compare_embeddings
+
+    same = compare_embeddings([1.0, 0.0, 0.0], [1.0, 0.0, 0.0], threshold=0.45)
+    assert same.is_match and same.score > 0.99
+    opposite = compare_embeddings([1.0, 0.0], [0.0, 1.0], threshold=0.45)
+    assert not opposite.is_match

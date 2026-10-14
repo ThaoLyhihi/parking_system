@@ -106,6 +106,17 @@ fee_schedule:
   OTO:
     - {start: "00:00", end: "24:00", first_hour: 10000, next_hour: 5000}
 
+face_verification:
+  # TUỲ CHỌN, TẮT theo mặc định — đối chiếu khuôn mặt người quẹt thẻ lúc vào/ra, CHỈ để
+  # cảnh báo thêm cho bảo vệ (không chặn mở barie), giống cảnh báo lệch biển số.
+  # ⚠️ NGOẠI LỆ OFFLINE DUY NHẤT của cả hệ thống: khi "enabled: true" lần đầu, server cần
+  # tải model InsightFace (buffalo_s) từ Internet một lần rồi lưu lại dùng offline mãi về
+  # sau. Nếu bãi xe không có Internet, hãy tải model trước khi mất mạng, hoặc để "enabled: false".
+  enabled: false
+  model_name: "buffalo_s"
+  threshold: 0.45       # cosine similarity, khuyến nghị 0.35-0.55 tuỳ chất lượng camera
+  det_size: 320
+
 auth:
   token_ttl_hours: 12
 

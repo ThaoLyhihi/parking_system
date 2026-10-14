@@ -39,6 +39,7 @@ from app.config import config
 from app.core.mailer import email_enabled, send_shift_report
 from app.core.reports import build_shift_pdf, fmt_dt, fmt_money, shift_stats
 from app.core.session_manager import VehicleSessionManager
+from app.face import verify as face_verify
 from app.db.base import get_session, init_db
 from app.db.seed import seed_defaults
 from app.db.models import AuthToken, Card, User, VehicleSession, VehicleType, WorkShift
@@ -267,6 +268,43 @@ def _broadcast_event(background: BackgroundTasks, **data) -> None:
     background.add_task(events.broadcast, {**data, "at": dt.datetime.utcnow().isoformat()})
 
 
+def _extract_face_embedding(frame: np.ndarray, face_cfg: dict) -> list[float] | None:
+    """Không bao giờ raise ra ngoài — lỗi model/khuôn mặt chỉ nên tạo cảnh báo,
+    tuyệt đối không được làm hỏng luồng quẹt thẻ/mở barie chính (xem chú thích
+    "face_verification" trong app/settings.py)."""
+    try:
+        return face_verify.extract_embedding(
+            frame, model_name=face_cfg["model_name"], det_size=face_cfg["det_size"],
+        )
+    except Exception:
+        logger.exception("Lỗi xác thực khuôn mặt (bỏ qua, không chặn giao dịch)")
+        return None
+
+
+def _face_verify_on_entry(session: VehicleSession, frame: np.ndarray | None, face_cfg: dict, messages: list[str]) -> None:
+    if not face_cfg["enabled"] or frame is None:
+        return
+    embedding = _extract_face_embedding(frame, face_cfg)
+    if embedding is None:
+        messages.append("Không nhận diện được khuôn mặt lúc vào — bỏ qua xác thực khuôn mặt")
+        return
+    session.face_embedding_in = face_verify.encode_embedding(embedding)
+
+
+def _face_verify_on_exit(session: VehicleSession, frame: np.ndarray | None, face_cfg: dict, messages: list[str]) -> None:
+    if not face_cfg["enabled"] or frame is None or not session.face_embedding_in:
+        return
+    embedding = _extract_face_embedding(frame, face_cfg)
+    if embedding is None:
+        messages.append("Không nhận diện được khuôn mặt lúc ra — bỏ qua xác thực khuôn mặt")
+        return
+    cmp = face_verify.compare_embeddings(
+        face_verify.decode_embedding(session.face_embedding_in), embedding, threshold=face_cfg["threshold"],
+    )
+    if not cmp.is_match:
+        messages.append(f"Cảnh báo: khuôn mặt lúc ra không khớp lúc vào (score={cmp.score:.2f}) — kiểm tra thủ công")
+
+
 @app.post("/card/scan", response_model=CardScanOut)
 def card_scan(payload: CardScanIn, background: BackgroundTasks, who: User | None = Depends(user_or_agent),
               db: Session = Depends(get_db)) -> CardScanOut:
@@ -324,11 +362,14 @@ def card_scan(payload: CardScanIn, background: BackgroundTasks, who: User | None
     )
     is_entry = open_session is None
     use_lpr = (vt.lpr_in_enabled if is_entry else vt.lpr_out_enabled) if vt else True
+    face_cfg = app_settings.get_section(db, "face_verification")
 
     reading = None
-    if use_lpr:
+    frame = None
+    if use_lpr or face_cfg["enabled"]:
         cam = _gate_camera_for(is_entry)
         frame = cam.read() if cam else None
+    if use_lpr:
         readings = _pipeline.read(frame) if frame is not None else []
         reading = readings[0] if readings else None
     if reading is None:
@@ -345,6 +386,7 @@ def card_scan(payload: CardScanIn, background: BackgroundTasks, who: User | None
         session = VehicleSession(card_number=payload.card_number, vehicle_type_code=vehicle_type,
                                   plate_in=reading.text or None, plate_in_confidence=reading.confidence,
                                   status="open", work_shift_id=work_shift.id)
+        _face_verify_on_entry(session, frame, face_cfg, messages)
         db.add(session)
         if card is not None and card.remaining_uses is not None:
             card.remaining_uses -= 1
@@ -359,6 +401,7 @@ def card_scan(payload: CardScanIn, background: BackgroundTasks, who: User | None
         if use_lpr and reading.text and open_session.plate_in and \
                 _plate_distance(reading.text, open_session.plate_in) > general["lpr_tolerance"]:
             messages.append(f"Biển số ra ({reading.text}) KHÁC biển số vào ({open_session.plate_in}) — kiểm tra thủ công")
+        _face_verify_on_exit(open_session, frame, face_cfg, messages)
         session_manager = VehicleSessionManager(db, _flow_counter, fee_schedule=config.get("fee_schedule", {}))
         transaction = session_manager.handle_exit(open_session, reading, work_shift_id=work_shift.id,
                                                   amount_override=0 if monthly else None)
@@ -383,16 +426,18 @@ class VisitorEntryOut(BaseModel):
     barrier_id: str
     plate_text: str
     plate_confidence: float
+    message: str | None = None
 
 
-def _read_gate_plate(is_entry: bool = True) -> PlateReading:
+def _read_gate_frame_and_plate(is_entry: bool = True) -> tuple[np.ndarray | None, PlateReading]:
     cam = _gate_camera_for(is_entry)
     frame = cam.read() if cam else None
     readings = _pipeline.read(frame) if frame is not None else []
-    return readings[0] if readings else PlateReading(
+    reading = readings[0] if readings else PlateReading(
         text="", confidence=0.0,
         detection=PlateDetection(bbox_xyxy=(0, 0, 0, 0), confidence=0.0, corners=np.zeros((4, 2))),
     )
+    return frame, reading
 
 
 @app.post("/visitor/entry", response_model=VisitorEntryOut)
@@ -403,11 +448,14 @@ def visitor_entry(payload: VisitorEntryIn, background: BackgroundTasks,
     số xe tồn và thu phí lúc ra — đúng yêu cầu "web gửi tín hiệu mở barie cho khách"."""
     work_shift = auth.open_work_shift(db, user)
     vt = db.query(VehicleType).filter(VehicleType.code == payload.vehicle_type).first()
-    reading = _read_gate_plate()
+    face_cfg = app_settings.get_section(db, "face_verification")
+    frame, reading = _read_gate_frame_and_plate()
     barrier_id = vt.barrier_in_id if vt else "1"
+    messages: list[str] = []
     session = VehicleSession(card_number=None, vehicle_type_code=payload.vehicle_type,
                              plate_in=reading.text or None, plate_in_confidence=reading.confidence,
                              status="open", work_shift_id=work_shift.id)
+    _face_verify_on_entry(session, frame, face_cfg, messages)
     db.add(session)
     db.commit()
     _flow_counter.record_entry(payload.vehicle_type)
@@ -415,7 +463,8 @@ def visitor_entry(payload: VisitorEntryIn, background: BackgroundTasks,
     _broadcast_event(background, type="entry", vehicle_type=payload.vehicle_type,
                      plate=reading.text, card_number=None)
     return VisitorEntryOut(session_id=session.id, barrier_id=barrier_id,
-                           plate_text=reading.text, plate_confidence=reading.confidence)
+                           plate_text=reading.text, plate_confidence=reading.confidence,
+                           message="; ".join(messages) or None)
 
 
 @app.get("/visitor/open")
@@ -432,6 +481,7 @@ class VisitorExitOut(BaseModel):
     barrier_id: str
     plate_text: str
     amount: int
+    message: str | None = None
 
 
 @app.post("/visitor/{session_id}/exit", response_model=VisitorExitOut)
@@ -442,14 +492,18 @@ def visitor_exit(session_id: int, background: BackgroundTasks,
         raise HTTPException(404, "Không tìm thấy khách đang trong bãi với mã này")
     work_shift = auth.open_work_shift(db, user)
     vt = db.query(VehicleType).filter(VehicleType.code == session.vehicle_type_code).first()
-    reading = _read_gate_plate(is_entry=False)
+    face_cfg = app_settings.get_section(db, "face_verification")
+    frame, reading = _read_gate_frame_and_plate(is_entry=False)
     barrier_id = vt.barrier_out_id if vt else "1"
+    messages: list[str] = []
+    _face_verify_on_exit(session, frame, face_cfg, messages)
     session_manager = VehicleSessionManager(db, _flow_counter, fee_schedule=config.get("fee_schedule", {}))
     transaction = session_manager.handle_exit(session, reading, work_shift_id=work_shift.id)
     _queue_open(barrier_id)
     _broadcast_event(background, type="exit", vehicle_type=session.vehicle_type_code,
                      plate=reading.text, card_number=None, amount=transaction.amount)
-    return VisitorExitOut(barrier_id=barrier_id, plate_text=reading.text, amount=transaction.amount)
+    return VisitorExitOut(barrier_id=barrier_id, plate_text=reading.text, amount=transaction.amount,
+                          message="; ".join(messages) or None)
 
 
 # ---- Hàng đợi lệnh barie cho agent + feed realtime --------------------------

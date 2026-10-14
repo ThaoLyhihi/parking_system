@@ -77,6 +77,21 @@ SCHEMA: dict[str, dict] = {
             {"key": "baudrate", "label": "Baudrate (chỉ dùng cho loại 'serial')", "type": "int", "default": 9600, "restart": True},
         ],
     },
+    "face_verification": {
+        "title": "Xác thực khuôn mặt (tuỳ chọn)",
+        "note": "Đối chiếu khuôn mặt người quẹt thẻ lúc vào/ra, CHỈ để cảnh báo thêm cho bảo vệ "
+                "(không chặn mở barie) — tương tự cảnh báo lệch biển số. TẮT theo mặc định. Khi "
+                "BẬT lần đầu, server cần tải model nhận diện khuôn mặt (buffalo_s) từ Internet "
+                "một lần duy nhất rồi lưu lại dùng offline mãi về sau — đây là NGOẠI LỆ duy nhất "
+                "của yêu cầu 'hoạt động khi mất Internet', nên nếu bãi xe không có Internet, hãy "
+                "tải model này trước khi mất mạng hoặc không bật tính năng này.",
+        "fields": [
+            {"key": "enabled", "label": "Bật xác thực khuôn mặt", "type": "bool", "default": False, "restart": True},
+            {"key": "model_name", "label": "Model InsightFace", "type": "text", "default": "buffalo_s", "restart": True},
+            {"key": "threshold", "label": "Ngưỡng cosine similarity (0.35-0.55 theo khuyến nghị)", "type": "float", "default": 0.45},
+            {"key": "det_size", "label": "Kích thước detector (px, vuông)", "type": "int", "default": 320, "restart": True},
+        ],
+    },
     "hardware_agent": {
         "title": "Hardware agent",
         "fields": [

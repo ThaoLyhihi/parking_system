@@ -194,6 +194,28 @@ ngoài nào được gọi ở bất kỳ đâu khác:
 Internet **một lần đầu**; sau đó `docker compose up` dùng image đã có sẵn trong máy, không cần
 Internet nữa (Docker không tự pull lại trừ khi bạn chủ động `--pull always` hoặc xoá image).
 
+## Xác thực khuôn mặt (tuỳ chọn, TẮT theo mặc định) — ngoại lệ offline duy nhất
+
+Model nhận diện khuôn mặt mới thêm trong `giuxe/giuxe1/model/face-recognition-main/fr_sdk`
+(InsightFace `buffalo_s`) đã được tích hợp vào `app/face/verify.py`, tách thành 2 bước
+`extract_embedding()`/`compare_embeddings()` (vendor gốc chỉ có 1 hàm `verify_face()` so trực
+tiếp 2 ảnh) — để lưu embedding khuôn mặt lúc xe VÀO một lần (cột `face_embedding_in` trong
+`vehicle_sessions`) rồi so khớp lúc xe RA mà không cần giữ lại ảnh vào.
+
+- **Bật/tắt**: mục "Xác thực khuôn mặt" trong Cài đặt (web admin) hoặc `face_verification.enabled`
+  trong `config.yaml` — **mặc định `false`**. Tắt thì `card_scan`/`visitor_entry`/`visitor_exit`
+  chạy y hệt như trước khi có tính năng này (đã test qua `test_face_verification_disabled_by_default_does_not_touch_session`).
+- **Không bao giờ chặn giao dịch/mở barie**: nếu không phát hiện được mặt, hoặc mặt lúc ra
+  không khớp lúc vào, hệ thống chỉ thêm 1 câu cảnh báo vào `message` trả về (giống cảnh báo lệch
+  biển số) để bảo vệ tự kiểm tra — xem `_face_verify_on_entry`/`_face_verify_on_exit` trong
+  `app/api/main.py`.
+- **⚠️ Ngoại lệ offline duy nhất của toàn hệ thống**: khi bật lần đầu, `insightface` tự tải model
+  `buffalo_s` từ Internet (khác với model ALPR — `detect.onnx` đã có sẵn trong repo, chạy suy luận
+  cục bộ hoàn toàn). Nếu bãi xe không có Internet, tải model trước khi mất mạng (model được cache
+  lại, các lần chạy sau không cần tải lại), hoặc để tính năng này tắt.
+- Dùng camera cổng vào/ra **đã có sẵn** (không cần thêm camera riêng) — trích embedding từ đúng
+  khung hình đã chụp cho ALPR.
+
 ## Cấu trúc
 
 ```
@@ -213,6 +235,8 @@ parking_system/
     barrier/
       safety_zone.py       # phát hiện chuyển động trong ROI (cảm biến = camera)
       controller.py         # state machine mở/đóng barie
+    face/
+      verify.py             # xác thực khuôn mặt 1:1 (InsightFace) — tuỳ chọn, TẮT theo mặc định
     core/
       fee.py                 # tính phí theo giờ
       session_manager.py    # luồng xe vào/ra, ghi DB
@@ -234,7 +258,7 @@ parking_system/
     windows_hardware_agent.py  # chạy TRÊN WINDOWS — xem mục "Triển khai trên Windows"
     build_agent_exe.bat     # đóng gói windows_hardware_agent.py thành .exe — chạy TRÊN WINDOWS
     list_com_ports.bat      # dò tên cổng COM thật trên máy — chạy TRÊN WINDOWS
-  tests/test_smoke.py      # 4 test, bao gồm /card/scan — đã chạy qua (xem mục Chạy thử)
+  tests/test_smoke.py      # 21 test, bao gồm /card/scan, visitor, websocket, face verification — đã chạy qua (xem mục Chạy thử)
   Dockerfile, docker-compose.yml   # app + PostgreSQL — đã build & chạy thử thành công
 ```
 
@@ -308,3 +332,10 @@ curl -X POST http://localhost:8000/card/scan -H "Content-Type: application/json"
 - `docker-compose.yml` giờ **bắt buộc** file `.env` (không có trong git) khai báo
   `PARKING_ADMIN_PASSWORD` và `AGENT_API_KEY` trước khi `docker compose build/up` chạy được
   — xem thông báo lỗi khi thiếu, nó tự nói rõ cần đặt biến nào.
+- **Xác thực khuôn mặt**: `pip install insightface` đã cài và chạy thử được trong môi trường
+  này, và toàn bộ logic (lưu embedding lúc vào, so khớp lúc ra, không chặn barie khi không khớp)
+  đã test qua `pytest` — nhưng test đó **mock hàm `extract_embedding()`**, chưa chạy `FaceAnalysis`
+  thật trên ảnh khuôn mặt thật (môi trường dev này không có ảnh mặt người/camera thật, và lần
+  chạy thật đầu tiên cần tải model `buffalo_s` từ Internet). Trước khi dùng thật, bật tính năng
+  này rồi thử với ảnh/camera thật, đặc biệt kiểm tra `threshold` có hợp với chất lượng camera
+  thực tế không (khuyến nghị 0.35-0.55, xem `giuxe/giuxe1/model/face-recognition-main/README.md`).

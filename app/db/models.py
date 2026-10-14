@@ -160,6 +160,10 @@ class VehicleSession(Base):
     # xem mục 4 trong tài liệu quy trình làm lại).
     image_in_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     image_out_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Embedding khuôn mặt (512 số thực, JSON-encoded) trích từ ảnh lúc vào, dùng để
+    # đối chiếu 1:1 lúc ra khi bật tính năng "face_verification" (xem app/face/verify.py).
+    # Chỉ ghi/so khớp khi tính năng này được bật trong cài đặt; không bắt buộc có mặt.
+    face_embedding_in: Mapped[str | None] = mapped_column(String(16000), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="open")  # open | closed
     shift_id: Mapped[int | None] = mapped_column(ForeignKey("shifts.id"), nullable=True)
     # Ca làm việc (đăng nhập thực tế của bảo vệ) đã quét thẻ cho xe VÀO.

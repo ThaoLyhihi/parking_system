@@ -17,6 +17,21 @@ pyserial==3.5
 # Database: PostgreSQL (gói chung qua Docker Compose, xem docker-compose.yml service "db")
 psycopg2-binary==2.9.13
 
+# Xác thực khuôn mặt (tuỳ chọn, tắt theo mặc định — xem mục "face_verification"
+# trong app/settings.py). Model buffalo_s tự tải từ Internet lúc bật lần đầu,
+# là ngoại lệ duy nhất của yêu cầu hoạt động offline.
+# `insightface` chính nó CHƯA cài ở đây: nó khai "Requires: opencv-python" (bản GUI,
+# cần libxcb/libGL...), xung đột với "opencv-python-headless" ở trên (cùng cài module
+# "cv2" nhưng đè file lên nhau -> ImportError thiếu libxcb khi chạy trong image slim
+# không có X11 — đã tự gặp lỗi này khi build & chạy thử image thật). Dockerfile cài
+# insightface bằng `pip install --no-deps` SAU dòng `pip install -r requirements.txt`
+# này để không kéo theo opencv-python bản GUI; các dependency còn lại của insightface
+# (ngoài opencv-python) khai rõ dưới đây để vẫn được cài đủ:
+onnx==1.23.2
+scikit-image==0.26.0
+scipy==1.18.1
+tqdm==4.70.1
+
 # Dev / test
 pytest==9.1.1
 httpx==0.28.1
