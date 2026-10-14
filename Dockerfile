@@ -15,6 +15,10 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# insightface (xác thực khuôn mặt, tuỳ chọn) khai "Requires: opencv-python" (bản GUI) —
+# cài --no-deps để không đè mất "opencv-python-headless" đã cài trên (xem chú thích
+# trong requirements.txt); các dependency còn lại của nó đã cài qua requirements.txt.
+RUN pip install --no-cache-dir --no-deps insightface==2.1
 
 COPY app/ app/
 COPY web/ web/

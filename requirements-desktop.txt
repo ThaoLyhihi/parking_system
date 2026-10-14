@@ -1,0 +1,20 @@
+# Thư viện để chạy / đóng gói ứng dụng desktop all-in-one (desktop/). Cài trên MÁY WINDOWS build:
+#   pip install -r requirements-desktop.txt
+# Khác requirements.txt (Docker): không có evdev (Linux), psycopg2 (PostgreSQL) và insightface
+# (xác thực khuôn mặt cần tải model từ Internet — bản offline không gói sẵn).
+opencv-python-headless==5.0.0.93
+onnxruntime==1.31.0
+numpy==2.5.4
+SQLAlchemy==2.1.4
+PyYAML==6.0.3
+fastapi==0.143.0
+uvicorn==0.54.0
+websockets>=13
+h11>=0.14
+python-multipart==0.0.32
+reportlab==5.0.1
+requests>=2.31
+pyserial==3.5
+keyboard==0.13.5; sys_platform == "win32"
+PySide6-Essentials>=6.7
+pyinstaller>=6.10

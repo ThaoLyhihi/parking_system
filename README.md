@@ -149,6 +149,40 @@ trên Windows thật** vì môi trường phát triển là Linux — PyInstalle
 sang Windows, nên lần build thật đầu tiên trên Windows có thể lộ ra lỗi riêng của Windows mà
 lần test trên Linux không thấy được (vd thiếu hidden-import nào đó chỉ xảy ra trên Windows).
 
+### Ứng dụng desktop all-in-one (khuyên dùng khi thi công bãi xe OFFLINE)
+
+Thư mục `desktop/` là **một ứng dụng cửa sổ (PySide6) chứa tất cả trong 1 tiến trình**: server FastAPI
+(chỉ nghe `127.0.0.1`) + CSDL **SQLite** + hardware agent (đầu đọc thẻ, barie COM) + giao diện.
+Không cần Docker, PostgreSQL, Internet hay cửa sổ dòng lệnh. Dữ liệu nằm ở
+`%LOCALAPPDATA%\ParkingAI` (CSDL `parking.db`, log `parking.log`, khoá agent tự sinh) nên cài lại/cập
+nhật ứng dụng không mất dữ liệu (đổi chỗ bằng biến môi trường `PARKING_DATA_DIR`).
+
+- **Lần chạy đầu**: hiện hộp thoại tạo tài khoản quản lý. Camera mẫu trong `config.example.yaml` bị bỏ,
+  barie ở chế độ `logging` (chỉ ghi log) — người dùng chỉnh lại trong **Cài đặt**.
+- **Tab Bảo vệ** (mọi tài khoản): camera trực tiếp (cổng vào/ra/barie), ô quét/nhập mã thẻ + kết quả
+  (vào/ra, biển số, phí, cảnh báo), khách không thẻ vào/ra, chỗ trống theo loại xe, danh sách xe vào/ra
+  **realtime**, thống kê ca + **Kết ca và lưu báo cáo PDF**.
+- **Tab quản lý** (chỉ admin): Tổng quan (trạng thái camera/barie), Thẻ (thêm/sửa/xoá, tìm, lọc hạn,
+  gia hạn vé tháng, lịch sử đóng tiền), Loại thẻ/xe, Biểu phí (+ tính thử), Tài khoản, Ca và báo cáo
+  (xuất PDF, doanh thu vé tháng), **Cài đặt**.
+- **Cài đặt → Phần cứng**: liệt kê cổng COM thật của máy, thử mở barie, xem mã thẻ vừa quẹt, nút
+  "Áp dụng cấu hình phần cứng" (agent nạp lại ngay, không cần khởi động lại ứng dụng). Các mục còn lại
+  (camera, ALPR, biểu phí, email, khuôn mặt...) tự dựng form từ schema của server; mục cần khởi động lại
+  thì ứng dụng hỏi và tự khởi động lại.
+
+Chạy từ mã nguồn: `pip install -r requirements-desktop.txt` rồi `python -m desktop.main`.
+
+**Đóng gói `.exe`** (thư mục `dist\ParkingAI\ParkingAI.exe`, mang cả thư mục sang máy khác):
+- Có máy Windows: chạy `scripts\build_desktop_exe.bat`.
+- Không có máy Windows: GitHub → tab **Actions** → **Build Windows desktop app** → Run workflow, rồi tải
+  artifact `ParkingAI-windows` (`.github/workflows/build-desktop.yml`).
+
+Giới hạn đã biết: bản desktop **không gói sẵn xác thực khuôn mặt** (`insightface` cần tải model từ
+Internet — đi ngược yêu cầu offline); tính năng đó vẫn có ở bản Docker. Đã test: `tests/test_desktop.py`
+(server nhúng + giao diện offscreen + quét thẻ + nạp mọi tab) và build + chạy thử bản đóng gói **trên
+Linux** (server lên, tạo CSDL). **Chưa build/chạy trên Windows thật** và chưa thử với đầu đọc thẻ/barie/
+camera thật.
+
 Agent gọi `POST /card/scan` khi có người quẹt thẻ (server quyết định vào/ra, chạy ALPR, ghi
 DB, trả về `barrier_id` cần mở) rồi agent tự gửi lệnh mở qua COM; sau đó agent hỏi lặp lại
 `GET /barrier/{id}/status` tới khi `safe_to_close=true` (do `BarrierSafetyZone` phía Docker
@@ -303,6 +337,14 @@ curl -X POST http://localhost:8000/card/scan -H "Content-Type: application/json"
 - Lưu ý khi build: `evdev` (dùng cho đầu đọc thẻ USB trên Linux) cần biên dịch từ source trong
   image `python:3.12-slim` (không có wheel sẵn) — Dockerfile đã cài `build-essential` +
   `linux-libc-dev` cho việc này; đừng xoá 2 package đó nếu sửa Dockerfile.
+- **Lưu ý khi build (đã tự gặp lỗi này, không phải giả định)**: `insightface` khai phụ thuộc
+  cứng vào `opencv-python` (bản GUI, cần `libxcb`/`libGL`...), xung đột với
+  `opencv-python-headless` mà dự án đang dùng cho image nhẹ — cả 2 cùng cài vào thư mục `cv2/`
+  nên cái cài sau đè file cái cài trước, làm `import cv2` lỗi thiếu `libxcb.so.1` trong image
+  `slim` không có X11. Dockerfile đã xử lý bằng cách cài `insightface` RIÊNG với
+  `pip install --no-deps` sau bước `pip install -r requirements.txt` (các dependency còn lại
+  của nó đã khai trong `requirements.txt`) — đừng gộp `insightface` vào `requirements.txt` theo
+  cách cài thường, sẽ lại kéo theo `opencv-python` bản GUI.
 - **Không có `devices:`/USB/COM nào trong `docker-compose.yml`** — theo thiết kế, vì mục tiêu
   triển khai là Windows (xem mục "Triển khai trên Windows" ở trên): phần cứng cục bộ chạy
   bằng `scripts/windows_hardware_agent.py` ngoài Docker, không qua container.

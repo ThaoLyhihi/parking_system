@@ -191,6 +191,13 @@ def occupancy(_: User = Depends(current_user)) -> dict:
     return _flow_counter.snapshot()
 
 
+@app.get("/vehicle-types")
+def public_vehicle_types(_: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
+    """Loại xe đang dùng (không phải vé tháng) — để bảo vệ chọn khi cho khách không thẻ vào."""
+    rows = db.query(VehicleType).filter(VehicleType.is_active.is_(True), VehicleType.is_monthly_pass.is_(False))
+    return [{"code": v.code, "display_name": v.display_name} for v in rows.order_by(VehicleType.id)]
+
+
 @app.get("/status/overview")
 def status_overview(_: User = Depends(current_user)) -> dict:
     """Tình trạng bãi xe thời gian thực cho trang quản lý (mục "Tình trạng bãi xe"):
@@ -215,6 +222,21 @@ def status_overview(_: User = Depends(current_user)) -> dict:
             "safe_to_close": zone.update(barrier_camera.read()) if (zone and barrier_camera) else False,
         },
     }
+
+
+@app.get("/camera/{name}/snapshot.jpg")
+def camera_snapshot(name: str, _: User = Depends(current_user)) -> Response:
+    """Khung hình mới nhất của 1 camera (gate_in | gate_out | barrier) cho giao diện desktop xem trực tiếp.
+    gate_out không có camera riêng thì trả khung của gate_in (1 làn chung ra/vào). 204 = chưa có tín hiệu."""
+    cam = {"gate_in": _gate_in_camera, "gate_out": _gate_out_camera or _gate_in_camera,
+           "barrier": _barrier_cameras.get("1")}.get(name)
+    if name not in ("gate_in", "gate_out", "barrier"):
+        raise HTTPException(404, "Không có camera này")
+    frame = cam.read() if cam else None
+    if frame is None:
+        return Response(status_code=204)
+    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+    return Response(buf.tobytes(), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/barrier/{barrier_id}/status", dependencies=[Depends(require_agent)])

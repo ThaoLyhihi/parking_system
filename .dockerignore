@@ -9,3 +9,7 @@ config/config.yaml
 build/
 dist/
 *.spec
+desktop/
+.github/
+requirements-desktop.txt
+parking_desktop.spec

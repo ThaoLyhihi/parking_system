@@ -9,3 +9,4 @@ config/config.yaml
 build/
 dist/
 *.spec
+!parking_desktop.spec

@@ -26,7 +26,11 @@ def _resolve_config_path() -> Path:
     real = _CONFIG_DIR / "config.yaml"
     if real.exists():
         return real
-    return _CONFIG_DIR / "config.example.yaml"
+    example = _CONFIG_DIR / "config.example.yaml"
+    if not example.exists() and getattr(sys, "frozen", False):
+        # Bản đóng gói onedir: config.example.yaml được PyInstaller gói kèm trong thư mục bundle.
+        return Path(getattr(sys, "_MEIPASS", _BASE_DIR)) / "config" / "config.example.yaml"
+    return example
 
 
 class Config:

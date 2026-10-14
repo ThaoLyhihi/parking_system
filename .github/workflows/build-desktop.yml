@@ -1,0 +1,22 @@
+name: Build Windows desktop app
+
+# Chạy tay: tab Actions -> "Build Windows desktop app" -> Run workflow. Tự chạy khi push tag v*.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-desktop.txt
+      - run: pyinstaller parking_desktop.spec --noconfirm --clean
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ParkingAI-windows
+          path: dist/ParkingAI/
