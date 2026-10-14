@@ -177,11 +177,17 @@ Chạy từ mã nguồn: `pip install -r requirements-desktop.txt` rồi `python
 - Không có máy Windows: GitHub → tab **Actions** → **Build Windows desktop app** → Run workflow, rồi tải
   artifact `ParkingAI-windows` (`.github/workflows/build-desktop.yml`).
 
-Giới hạn đã biết: bản desktop **không gói sẵn xác thực khuôn mặt** (`insightface` cần tải model từ
-Internet — đi ngược yêu cầu offline); tính năng đó vẫn có ở bản Docker. Đã test: `tests/test_desktop.py`
-(server nhúng + giao diện offscreen + quét thẻ + nạp mọi tab) và build + chạy thử bản đóng gói **trên
-Linux** (server lên, tạo CSDL). **Chưa build/chạy trên Windows thật** và chưa thử với đầu đọc thẻ/barie/
-camera thật.
+**Xác thực khuôn mặt chạy offline**: model `buffalo_s` (chỉ 2 file cần dùng: phát hiện mặt + nhúng mặt, ~16MB) đã
+nằm sẵn trong `models/insightface/` và được gói vào `.exe` — bật tính năng KHÔNG cần Internet. Tính năng vẫn
+TẮT mặc định (bật ở Cài đặt → "Xác thực khuôn mặt"). Có Internet hay không đều chạy như nhau. `insightface`
+phải cài riêng `pip install --no-deps insightface==2.1` (đã nằm trong `.bat` và workflow). Bản build có
+`ParkingAI.exe --selftest` để kiểm tra nhanh đã nạp đủ model.
+
+Đã test thật (không mock): trích embedding từ ảnh mặt, cùng mặt ≈ 0.96–1.0, khác người ≈ 0, ảnh không có mặt
+→ None; `tests/test_desktop.py` (server nhúng + giao diện offscreen + quét thẻ + nạp mọi tab); build + chạy
+`--selftest` bản đóng gói **trên Linux** (cả khi không có cache model). **Chưa build/chạy trên Windows thật**,
+chưa thử với đầu đọc thẻ/barie/camera thật, và ngưỡng 0.45 chưa chỉnh theo camera thực tế. Thư mục build
+khoảng 580MB (Linux).
 
 Agent gọi `POST /card/scan` khi có người quẹt thẻ (server quyết định vào/ra, chạy ALPR, ghi
 DB, trả về `barrier_id` cần mở) rồi agent tự gửi lệnh mở qua COM; sau đó agent hỏi lặp lại
@@ -228,7 +234,7 @@ ngoài nào được gọi ở bất kỳ đâu khác:
 Internet **một lần đầu**; sau đó `docker compose up` dùng image đã có sẵn trong máy, không cần
 Internet nữa (Docker không tự pull lại trừ khi bạn chủ động `--pull always` hoặc xoá image).
 
-## Xác thực khuôn mặt (tuỳ chọn, TẮT theo mặc định) — ngoại lệ offline duy nhất
+## Xác thực khuôn mặt (tuỳ chọn, TẮT theo mặc định)
 
 Model nhận diện khuôn mặt mới thêm trong `giuxe/giuxe1/model/face-recognition-main/fr_sdk`
 (InsightFace `buffalo_s`) đã được tích hợp vào `app/face/verify.py`, tách thành 2 bước
@@ -243,10 +249,9 @@ tiếp 2 ảnh) — để lưu embedding khuôn mặt lúc xe VÀO một lần (
   không khớp lúc vào, hệ thống chỉ thêm 1 câu cảnh báo vào `message` trả về (giống cảnh báo lệch
   biển số) để bảo vệ tự kiểm tra — xem `_face_verify_on_entry`/`_face_verify_on_exit` trong
   `app/api/main.py`.
-- **⚠️ Ngoại lệ offline duy nhất của toàn hệ thống**: khi bật lần đầu, `insightface` tự tải model
-  `buffalo_s` từ Internet (khác với model ALPR — `detect.onnx` đã có sẵn trong repo, chạy suy luận
-  cục bộ hoàn toàn). Nếu bãi xe không có Internet, tải model trước khi mất mạng (model được cache
-  lại, các lần chạy sau không cần tải lại), hoặc để tính năng này tắt.
+- **Chạy offline**: model `buffalo_s` (chỉ 2 file cần dùng, ~16MB) nằm sẵn trong `models/insightface/` và
+  được gói vào cả image Docker lẫn `.exe` desktop — không cần Internet. Thiếu thư mục này thì
+  `insightface` mới tự tải về `~/.insightface`.
 - Dùng camera cổng vào/ra **đã có sẵn** (không cần thêm camera riêng) — trích embedding từ đúng
   khung hình đã chụp cho ALPR.
 
@@ -374,10 +379,8 @@ curl -X POST http://localhost:8000/card/scan -H "Content-Type: application/json"
 - `docker-compose.yml` giờ **bắt buộc** file `.env` (không có trong git) khai báo
   `PARKING_ADMIN_PASSWORD` và `AGENT_API_KEY` trước khi `docker compose build/up` chạy được
   — xem thông báo lỗi khi thiếu, nó tự nói rõ cần đặt biến nào.
-- **Xác thực khuôn mặt**: `pip install insightface` đã cài và chạy thử được trong môi trường
-  này, và toàn bộ logic (lưu embedding lúc vào, so khớp lúc ra, không chặn barie khi không khớp)
-  đã test qua `pytest` — nhưng test đó **mock hàm `extract_embedding()`**, chưa chạy `FaceAnalysis`
-  thật trên ảnh khuôn mặt thật (môi trường dev này không có ảnh mặt người/camera thật, và lần
-  chạy thật đầu tiên cần tải model `buffalo_s` từ Internet). Trước khi dùng thật, bật tính năng
-  này rồi thử với ảnh/camera thật, đặc biệt kiểm tra `threshold` có hợp với chất lượng camera
+- **Xác thực khuôn mặt**: `FaceAnalysis` đã chạy thật trên ảnh mặt (cùng mặt ≈ 0.96–1.0, khác người ≈ 0,
+  không có mặt → None; xem `test_face_model_bundled_runs_offline`), nhưng logic vào/ra trong API vẫn test
+  qua `pytest` bằng cách mock `extract_embedding()`. Chưa thử với camera cổng thật. Trước khi dùng thật,
+  bật tính năng rồi thử với camera thật, đặc biệt kiểm tra `threshold` có hợp với chất lượng camera
   thực tế không (khuyến nghị 0.35-0.55, xem `giuxe/giuxe1/model/face-recognition-main/README.md`).

@@ -186,7 +186,25 @@ class Controller:
         self.app.quit()
 
 
+def selftest() -> int:
+    """`ParkingAI.exe --selftest`: kiểm tra bản đã đóng gói nạp được server, model biển số, font PDF và model khuôn mặt
+    (không mở giao diện). In SELFTEST_OK và trả 0 nếu tất cả đúng."""
+    import numpy as np
+    import app.api.main  # noqa: F401  (nạp model ONNX biển số + khởi tạo FastAPI)
+    import app.core.reports  # noqa: F401  (đăng ký font tiếng Việt cho PDF)
+    from app.face import verify
+
+    if verify._bundled_root("buffalo_s") is None:
+        print("SELFTEST_FAIL: thiếu model khuôn mặt đóng gói sẵn")
+        return 1
+    verify.extract_embedding(np.zeros((320, 320, 3), np.uint8))  # nạp model; ảnh trống -> None
+    print("SELFTEST_OK")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
     setup_logging()
     app = QApplication(sys.argv)
     app.setStyleSheet(STYLE)

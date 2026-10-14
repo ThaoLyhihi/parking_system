@@ -19,7 +19,15 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+rem insightface cai rieng, khong keo theo opencv-python ban GUI (xem requirements-desktop.txt)
+pip install --disable-pip-version-check -q --no-deps insightface==2.1
 pyinstaller parking_desktop.spec --noconfirm --clean
+if errorlevel 1 (
+    echo [LOI] Build that bai, xem log phia tren.
+    pause
+    exit /b 1
+)
+dist\ParkingAI\ParkingAI.exe --selftest
 if errorlevel 1 (
     echo [LOI] Build that bai, xem log phia tren.
     pause

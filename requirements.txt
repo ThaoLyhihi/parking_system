@@ -18,8 +18,8 @@ pyserial==3.5
 psycopg2-binary==2.9.13
 
 # Xác thực khuôn mặt (tuỳ chọn, tắt theo mặc định — xem mục "face_verification"
-# trong app/settings.py). Model buffalo_s tự tải từ Internet lúc bật lần đầu,
-# là ngoại lệ duy nhất của yêu cầu hoạt động offline.
+# trong app/settings.py). Model buffalo_s nằm sẵn trong models/insightface
+# (chạy offline, không cần tải).
 # `insightface` chính nó CHƯA cài ở đây: nó khai "Requires: opencv-python" (bản GUI,
 # cần libxcb/libGL...), xung đột với "opencv-python-headless" ở trên (cùng cài module
 # "cv2" nhưng đè file lên nhau -> ImportError thiếu libxcb khi chạy trong image slim

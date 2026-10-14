@@ -429,3 +429,17 @@ def test_face_compare_embeddings_threshold():
     assert same.is_match and same.score > 0.99
     opposite = compare_embeddings([1.0, 0.0], [0.0, 1.0], threshold=0.45)
     assert not opposite.is_match
+
+
+def test_face_model_bundled_runs_offline():
+    """Model buffalo_s (det + recognition) nằm sẵn trong models/insightface -> không cần Internet; chạy thật, không mock."""
+    pytest.importorskip("insightface")
+    from insightface.data import get_image
+    from app.face import verify
+
+    assert verify._bundled_root("buffalo_s") is not None
+    img = get_image("t1")
+    emb = verify.extract_embedding(img)
+    assert emb is not None and len(emb) == 512
+    assert verify.compare_embeddings(emb, emb, threshold=0.45).is_match
+    assert verify.extract_embedding(np.zeros((300, 300, 3), np.uint8)) is None  # không có mặt -> None, không raise

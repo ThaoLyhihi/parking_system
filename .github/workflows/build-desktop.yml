@@ -15,7 +15,10 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements-desktop.txt
+      - run: pip install --no-deps insightface==2.1
       - run: pyinstaller parking_desktop.spec --noconfirm --clean
+      - name: Selftest bản đã đóng gói (nạp server, model biển số + khuôn mặt)
+        run: dist/ParkingAI/ParkingAI.exe --selftest
       - uses: actions/upload-artifact@v4
         with:
           name: ParkingAI-windows

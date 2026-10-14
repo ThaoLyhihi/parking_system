@@ -2,18 +2,28 @@
 (giuxe/giuxe1/model/face-recognition-main/fr_sdk) thành 2 bước extract/compare
 riêng — để lưu embedding lúc xe VÀO một lần rồi so khớp lúc xe RA, không cần
 giữ/đọc lại ảnh vào. Chỉ dùng khi cài đặt "face_verification.enabled" = true
-(xem app/settings.py) — tính năng tắt theo mặc định và là ngoại lệ duy nhất
-của yêu cầu hoạt động offline (model tải từ Internet một lần lúc bật lần đầu).
+(xem app/settings.py) — tắt theo mặc định. Model nằm sẵn trong models/insightface
+nên chạy offline; thiếu thư mục đó thì insightface mới tự tải về ~/.insightface.
 """
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
 
 _APP_CACHE: dict[tuple[str, tuple[str, ...], int], Any] = {}
+
+
+def _bundled_root(model_name: str) -> str | None:
+    """Thư mục models/insightface đi kèm dự án/bản đóng gói (chứa models/<tên>/*.onnx) -> chạy OFFLINE hoàn toàn,
+    không phải tải từ Internet. Không có thì trả None để insightface dùng ~/.insightface (tự tải lần đầu)."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent.parent))
+    root = base / "models" / "insightface"
+    return str(root) if any((root / "models" / model_name).glob("*.onnx")) else None
 
 
 def _get_face_app(model_name: str, providers: Sequence[str] | None, det_size: int):
@@ -22,7 +32,13 @@ def _get_face_app(model_name: str, providers: Sequence[str] | None, det_size: in
     providers = tuple(providers) if providers else ("CPUExecutionProvider",)
     key = (model_name, providers, det_size)
     if key not in _APP_CACHE:
-        app = FaceAnalysis(name=model_name, providers=list(providers))
+        kwargs: dict[str, Any] = {}
+        root = _bundled_root(model_name)
+        if root:
+            kwargs["root"] = root
+        # Chỉ cần phát hiện + nhúng khuôn mặt (embedding); bỏ landmark 3D (143MB) và giới tính/tuổi.
+        app = FaceAnalysis(name=model_name, providers=list(providers),
+                           allowed_modules=["detection", "recognition"], **kwargs)
         app.prepare(ctx_id=0, det_size=(det_size, det_size))
         _APP_CACHE[key] = app
     return _APP_CACHE[key]

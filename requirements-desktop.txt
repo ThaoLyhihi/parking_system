@@ -1,7 +1,13 @@
 # Thư viện để chạy / đóng gói ứng dụng desktop all-in-one (desktop/). Cài trên MÁY WINDOWS build:
 #   pip install -r requirements-desktop.txt
-# Khác requirements.txt (Docker): không có evdev (Linux), psycopg2 (PostgreSQL) và insightface
-# (xác thực khuôn mặt cần tải model từ Internet — bản offline không gói sẵn).
+# Khác requirements.txt (Docker): không có evdev (Linux) và psycopg2 (PostgreSQL).
+# Xác thực khuôn mặt: model buffalo_s đã gói sẵn trong models/insightface (chạy offline). Thư viện `insightface`
+# phải cài RIÊNG, SAU file này, bằng:  pip install --no-deps insightface==2.1
+# (nó khai "Requires: opencv-python" bản GUI, sẽ đè mất opencv-python-headless nếu cài thường).
+onnx==1.23.2
+scikit-image==0.26.0
+scipy==1.18.1
+tqdm==4.70.1
 opencv-python-headless==5.0.0.93
 onnxruntime==1.31.0
 numpy==2.5.4
