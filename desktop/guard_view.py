@@ -25,6 +25,10 @@ class CameraPoller(QThread):
         super().__init__(parent)
         self._base, self._token = base_url, token
         self._running = True
+        # zoom tạm do bảo vệ chọn trên từng ô camera; None = dùng zoom mặc định trong Cài đặt
+        self.zooms: dict[str, float | None] = {}
+        self.pans: dict[str, tuple[float, float]] = {}   # tâm vùng zoom (0-1), mặc định giữa khung
+        self.eff_zoom: dict[str, float] = {}             # zoom thực tế server đang áp (kể cả mặc định)
 
     def run(self) -> None:
         s = requests.Session()
@@ -33,8 +37,16 @@ class CameraPoller(QThread):
                 if not self._running:
                     return
                 try:
+                    z = self.zooms.get(name)
+                    cx, cy = self.pans.get(name, (0.5, 0.5))
+                    params = {"cx": cx, "cy": cy}
+                    if z:
+                        params["zoom"] = z
                     r = s.get(f"{self._base}/camera/{name}/snapshot.jpg", timeout=2,
+                              params=params,
                               headers={"Authorization": f"Bearer {self._token}"})
+                    if r.status_code == 200:
+                        self.eff_zoom[name] = float(r.headers.get("X-Zoom", 1))
                     self.frame.emit(name, r.content if r.status_code == 200 else b"")
                 except requests.RequestException:
                     self.frame.emit(name, b"")
@@ -83,16 +95,52 @@ class EventListener(QThread):
 
 
 class CameraBox(QGroupBox):
+    pan_changed = Signal(float, float)   # tâm vùng zoom mới (0-1)
+    pan_reset = Signal()
+
     def __init__(self, title: str) -> None:
         super().__init__(title)
+        self.center = (0.5, 0.5)
+        self.eff_zoom = 1.0     # do GuardView cập nhật từ header X-Zoom
+        self._drag = None
         self.view = label("Chưa có tín hiệu")
         styled(self.view, role="cam")
         self.view.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.view.setMinimumSize(320, 180)
+        self.view.setToolTip("Khi đã zoom: kéo chuột để dời vùng xem, nháy đúp để về giữa khung")
+        self.view.mousePressEvent = self._press
+        self.view.mouseMoveEvent = self._move
+        self.view.mouseDoubleClickEvent = lambda e: self.pan_reset.emit()
         self.view.setSizePolicy(self.view.sizePolicy().horizontalPolicy(), self.view.sizePolicy().verticalPolicy())
         lay = QVBoxLayout(self)
         lay.addWidget(self.view)
+        zr = QHBoxLayout()
+        zr.addStretch(1)
+        zr.addWidget(label("Zoom:", "muted"))
+        self.zoom_box = QComboBox()
+        self.zoom_box.addItem("Mặc định", None)
+        for z in (1, 2, 4, 8):
+            self.zoom_box.addItem(f"{z}x", float(z))
+        zr.addWidget(self.zoom_box)
+        lay.addLayout(zr)
         self._pix: QPixmap | None = None
+
+    def _press(self, e) -> None:
+        self._drag = e.position()
+
+    def _move(self, e) -> None:
+        # Kéo ảnh sang phải = xem phần bên trái -> tâm đi ngược chiều kéo. Đổi pixel trên ô hiển thị
+        # sang tỉ lệ khung gốc: vùng đang xem chiếm 1/zoom khung nên nhân thêm 1/zoom.
+        if self._drag is None or self.eff_zoom <= 1.0 or not self._pix or not (e.buttons() & Qt.MouseButton.LeftButton):
+            return
+        shown = self._pix.scaled(self.view.size(), Qt.AspectRatioMode.KeepAspectRatio)
+        if shown.width() <= 0 or shown.height() <= 0:
+            return
+        dx, dy = e.position().x() - self._drag.x(), e.position().y() - self._drag.y()
+        self._drag = e.position()
+        cx = min(max(self.center[0] - dx / shown.width() / self.eff_zoom, 0.0), 1.0)
+        cy = min(max(self.center[1] - dy / shown.height() / self.eff_zoom, 0.0), 1.0)
+        self.pan_changed.emit(cx, cy)
 
     def set_jpeg(self, data: bytes) -> None:
         if not data:
@@ -140,6 +188,10 @@ class GuardView(QWidget):
         grid = QGridLayout()
         for i, (name, title) in enumerate(CAMERAS):
             self.cams[name] = CameraBox(title)
+            self.cams[name].zoom_box.currentIndexChanged.connect(
+                lambda _i, n=name: self._set_zoom(n))
+            self.cams[name].pan_changed.connect(lambda x, y, n=name: self._set_pan(n, x, y))
+            self.cams[name].pan_reset.connect(lambda n=name: self._set_pan(n, 0.5, 0.5))
             grid.addWidget(self.cams[name], 0 if i < 2 else 1, i % 2)
         self.stats_box = QGroupBox("Chỗ trống trong bãi")
         self.stats_lay = QHBoxLayout(self.stats_box)
@@ -198,7 +250,16 @@ class GuardView(QWidget):
             pass
 
     # ---- cập nhật ------------------------------------------------------------
+    def _set_zoom(self, name: str) -> None:
+        self.poller.zooms[name] = self.cams[name].zoom_box.currentData()
+        self._set_pan(name, 0.5, 0.5)   # đổi mức zoom thì về giữa khung
+
+    def _set_pan(self, name: str, cx: float, cy: float) -> None:
+        self.cams[name].center = (cx, cy)
+        self.poller.pans[name] = (cx, cy)
+
     def _on_frame(self, name: str, data: bytes) -> None:
+        self.cams[name].eff_zoom = self.poller.eff_zoom.get(name, 1.0)
         self.cams[name].set_jpeg(data)
 
     def _on_event(self, ev: dict) -> None:

@@ -44,7 +44,7 @@ from app.db.base import get_session, init_db
 from app.db.seed import seed_defaults
 from app.db.models import AuthToken, Card, User, VehicleSession, VehicleType, WorkShift
 from app.occupancy.flow_counter import FlowCounter
-from app.vision.camera import CameraSpec, CameraStream
+from app.vision.camera import CameraSpec, CameraStream, center_crop
 
 logger = logging.getLogger("api")
 
@@ -126,8 +126,17 @@ def _safety_monitor_loop(barrier_id: str, camera: CameraStream, roi_cfg: SafetyZ
     zone = BarrierSafetyZone(roi_cfg)
     with _safety_lock:
         _safety_zones[barrier_id] = zone
+    last_seq = -1
     while True:
+        # Chỉ xử lý khi có khung MỚI và tối đa ~10 lần/giây (đủ cho phát hiện vật cản),
+        # trước đây vòng lặp này chạy không nghỉ và chiếm gần trọn một nhân CPU.
+        seq = camera.frame_seq
+        if seq == last_seq and camera.is_connected:
+            time.sleep(0.02)
+            continue
+        last_seq = seq
         zone.update(camera.read())
+        time.sleep(0.1)
 
 
 @app.on_event("startup")
@@ -224,10 +233,33 @@ def status_overview(_: User = Depends(current_user)) -> dict:
     }
 
 
+_display_cache: tuple[float, dict] = (0.0, {})
+
+
+def _display_settings() -> dict:
+    """Cài đặt hiển thị camera, cache 2 giây để không đọc DB mỗi lần giao diện kéo ảnh (4 lần/giây × 3 camera)."""
+    global _display_cache
+    ts, val = _display_cache
+    if val and time.monotonic() - ts < 2.0:
+        return val
+    db = get_session()
+    try:
+        val = app_settings.get_section(db, "camera_display")
+    finally:
+        db.close()
+    val["max_height"] = max(0, int(val["max_height"]))
+    val["jpeg_quality"] = min(95, max(30, int(val["jpeg_quality"])))
+    _display_cache = (time.monotonic(), val)
+    return val
+
+
 @app.get("/camera/{name}/snapshot.jpg")
-def camera_snapshot(name: str, _: User = Depends(current_user)) -> Response:
+def camera_snapshot(name: str, zoom: float | None = None, cx: float = 0.5, cy: float = 0.5, height: int | None = None, _: User = Depends(current_user)) -> Response:
     """Khung hình mới nhất của 1 camera (gate_in | gate_out | barrier) cho giao diện desktop xem trực tiếp.
     gate_out không có camera riêng thì trả khung của gate_in (1 làn chung ra/vào). 204 = chưa có tín hiệu."""
+    disp = _display_settings()
+    if not disp["enabled"]:
+        raise HTTPException(403, "Đã tắt xem camera trực tiếp trong Cài đặt")
     cam = {"gate_in": _gate_in_camera, "gate_out": _gate_out_camera or _gate_in_camera,
            "barrier": _barrier_cameras.get("1")}.get(name)
     if name not in ("gate_in", "gate_out", "barrier"):
@@ -235,8 +267,17 @@ def camera_snapshot(name: str, _: User = Depends(current_user)) -> Response:
     frame = cam.read() if cam else None
     if frame is None:
         return Response(status_code=204)
-    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-    return Response(buf.tobytes(), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+    # Chỉ ảnh XEM TRỰC TIẾP bị zoom/thu nhỏ; khung hình AI đọc (cam.read()) vẫn là luồng chính nguyên bản.
+    z = zoom if zoom is not None else disp[f"zoom_{name}"]
+    z = min(max(float(z), 1.0), 16.0)
+    frame = center_crop(frame, z, cx, cy)
+    max_h = disp["max_height"] if height is None else height
+    h, w = frame.shape[:2]
+    if 0 < max_h < h:
+        frame = cv2.resize(frame, (max(1, int(w * max_h / h)), max_h), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, disp["jpeg_quality"]])
+    return Response(buf.tobytes(), media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store", "X-Zoom": f"{z:g}"})
 
 
 @app.get("/barrier/{barrier_id}/status", dependencies=[Depends(require_agent)])

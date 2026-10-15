@@ -49,6 +49,21 @@ SCHEMA: dict[str, dict] = {
             {"key": "barrier_source", "label": "Camera barie (tuỳ chọn — lớp an toàn barie)", "type": "text", "default": "", "restart": True},
         ],
     },
+    "camera_display": {
+        "title": "Hiển thị camera",
+        "note": "CHỈ ảnh xem trực tiếp trên màn hình bảo vệ. Các module AI (biển số, an toàn barie, "
+                "khuôn mặt) vẫn dùng khung hình gốc của luồng chính, không bị ảnh hưởng bởi mục này. "
+                "Có hiệu lực sau vài giây, không cần khởi động lại. Zoom ở đây là mặc định; bảo vệ "
+                "vẫn đổi tạm được ngay trên từng ô camera.",
+        "fields": [
+            {"key": "enabled", "label": "Cho phép xem camera trực tiếp (tắt = server không trả ảnh nào, kể cả cho màn hình bảo vệ)", "type": "bool", "default": True},
+            {"key": "max_height", "label": "Chiều cao tối đa ảnh xem trực tiếp (px, 0 = giữ nguyên gốc)", "type": "int", "default": 960},
+            {"key": "jpeg_quality", "label": "Chất lượng JPEG (30-95)", "type": "int", "default": 70},
+            {"key": "zoom_gate_in", "label": "Zoom mặc định camera cổng vào (1 = không zoom)", "type": "float", "default": 1.0},
+            {"key": "zoom_gate_out", "label": "Zoom mặc định camera cổng ra", "type": "float", "default": 1.0},
+            {"key": "zoom_barrier", "label": "Zoom mặc định camera barie", "type": "float", "default": 1.0},
+        ],
+    },
     "barrier_safety": {
         "title": "An toàn barie",
         "fields": [

@@ -443,3 +443,70 @@ def test_face_model_bundled_runs_offline():
     assert emb is not None and len(emb) == 512
     assert verify.compare_embeddings(emb, emb, threshold=0.45).is_match
     assert verify.extract_embedding(np.zeros((300, 300, 3), np.uint8)) is None  # không có mặt -> None, không raise
+
+
+def test_camera_snapshot_display_only_resizes_and_zooms_copy(monkeypatch, tmp_path):
+    """Ảnh xem trực tiếp bị giới hạn chiều cao + zoom theo cài đặt, còn khung hình
+    gốc mà AI đọc (cam.read()) giữ nguyên độ phân giải luồng chính."""
+    import cv2
+    import numpy as np
+    import app.api.main as m
+    from app import settings as app_settings
+    from app.db.base import get_session
+
+    class _Cam:
+        frame = np.zeros((1440, 2560, 3), dtype=np.uint8)
+
+        def read(self):
+            return self.frame
+
+    c = _fresh_client(monkeypatch, tmp_path)
+    guard = _login(c, "bv1", "guardpass123")
+    cam = _Cam()
+    monkeypatch.setattr(m, "_gate_in_camera", cam)
+    db = get_session()
+    app_settings.save_section(db, "camera_display", {"max_height": 960})
+    db.close()
+    monkeypatch.setattr(m, "_display_cache", (0.0, {}))
+
+    def _shape(**params):
+        r = c.get("/camera/gate_in/snapshot.jpg", headers=guard, params=params)
+        assert r.status_code == 200
+        return cv2.imdecode(np.frombuffer(r.content, np.uint8), cv2.IMREAD_COLOR).shape[:2]
+
+    assert _shape() == (960, 1706)            # 1440p -> 960p
+    assert _shape(height=0) == (1440, 2560)   # giữ nguyên gốc
+    assert _shape(zoom=2) == (720, 1280)      # cắt giữa, đã nhỏ hơn 960 nên không resize
+    assert cam.frame.shape[:2] == (1440, 2560)  # khung của AI không bị đổi
+
+    # dời vùng zoom: ảnh xem đổi theo tâm, vùng cắt luôn nằm trọn trong khung
+    cam.frame = np.zeros((1440, 2560, 3), dtype=np.uint8)
+    cam.frame[:, :1280] = 255                  # nửa trái trắng, nửa phải đen
+    def _mean(**p):
+        r = c.get("/camera/gate_in/snapshot.jpg", headers=guard, params={"zoom": 4, **p})
+        return cv2.imdecode(np.frombuffer(r.content, np.uint8), cv2.IMREAD_GRAYSCALE).mean()
+    assert _mean(cx=0.1) > 200 and _mean(cx=0.9) < 50 and _mean(cx=-5) > 200 and _mean(cx=9) < 50
+
+
+def test_camera_snapshot_can_be_disabled_in_settings(monkeypatch, tmp_path):
+    """Công tắc "Cho phép xem camera trực tiếp" tắt -> server không trả ảnh nào."""
+    import numpy as np
+    import app.api.main as m
+    from app import settings as app_settings
+    from app.db.base import get_session
+
+    class _Cam:
+        def read(self):
+            return np.zeros((100, 100, 3), dtype=np.uint8)
+
+    c = _fresh_client(monkeypatch, tmp_path)
+    guard = _login(c, "bv1", "guardpass123")
+    monkeypatch.setattr(m, "_gate_in_camera", _Cam())
+    monkeypatch.setattr(m, "_display_cache", (0.0, {}))
+    assert c.get("/camera/gate_in/snapshot.jpg", headers=guard).status_code == 200
+
+    db = get_session()
+    app_settings.save_section(db, "camera_display", {"enabled": False})
+    db.close()
+    monkeypatch.setattr(m, "_display_cache", (0.0, {}))
+    assert c.get("/camera/gate_in/snapshot.jpg", headers=guard).status_code == 403

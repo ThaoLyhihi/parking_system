@@ -12,9 +12,18 @@ thường gặp khi đọc RTSP bằng OpenCV, không phải suy đoán.
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
 from dataclasses import dataclass
+
+# Tương đương probSize="50000" trong cameras.config của phần mềm cũ: FFmpeg phân tích
+# luồng ít hơn -> kết nối RTSP nhanh, ít trễ. Phải đặt TRƯỚC khi tạo VideoCapture đầu tiên;
+# setdefault để người dùng vẫn ghi đè được bằng biến môi trường.
+os.environ.setdefault(
+    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
+    "rtsp_transport;tcp|probesize;50000|analyzeduration;0|fflags;nobuffer",
+)
 
 import cv2
 import numpy as np
@@ -29,9 +38,14 @@ class CameraSpec:
 class CameraStream:
     """Đọc 1 luồng camera trong thread riêng, luôn giữ frame mới nhất."""
 
-    def __init__(self, spec: CameraSpec, reconnect_delay: float = 2.0):
+    def __init__(self, spec: CameraSpec, reconnect_delay: float = 2.0, max_fps: float = 15.0):
         self.spec = spec
         self._reconnect_delay = reconnect_delay
+        # Chỉ giải mã/chuyển màu tối đa max_fps khung/giây; các khung thừa chỉ bị grab() bỏ đi
+        # (vẫn phải đọc để buffer RTSP không đầy) -> giảm CPU mà vẫn luôn có khung mới nhất.
+        self._min_interval = 1.0 / max_fps if max_fps > 0 else 0.0
+        self._last_retrieve = 0.0
+        self._seq = 0
         self._cap: cv2.VideoCapture | None = None
         self._frame: np.ndarray | None = None
         self._lock = threading.Lock()
@@ -55,6 +69,8 @@ class CameraStream:
         source = self.spec.source
         # Cho phép dùng chỉ số webcam (int) khi test local, URL/path (str) khi thật.
         self._cap = cv2.VideoCapture(source)
+        if self._cap is not None:
+            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # giữ độ trễ thấp, không xếp hàng khung cũ
         return bool(self._cap and self._cap.isOpened())
 
     def _loop(self) -> None:
@@ -63,7 +79,14 @@ class CameraStream:
                 if not self._open():
                     time.sleep(self._reconnect_delay)
                     continue
-            ok, frame = self._cap.read()
+            ok = self._cap.grab()
+            frame = None
+            if ok:
+                now = time.monotonic()
+                if now - self._last_retrieve < self._min_interval:
+                    continue
+                self._last_retrieve = now
+                ok, frame = self._cap.retrieve()
             if not ok:
                 # Mất kết nối giữa chừng (rất thường gặp với RTSP) -> fail-safe:
                 # không giữ frame cũ vô hạn, để lớp gọi (ví dụ barrier safety)
@@ -76,6 +99,12 @@ class CameraStream:
                 continue
             with self._lock:
                 self._frame = frame
+                self._seq += 1
+
+    @property
+    def frame_seq(self) -> int:
+        """Tăng mỗi khi có khung mới — để bên xử lý bỏ qua khung đã xử lý rồi."""
+        return self._seq
 
     def read(self) -> np.ndarray | None:
         """Trả về frame mới nhất, hoặc None nếu đang mất kết nối camera."""
@@ -98,3 +127,16 @@ def crop_zoom(frame: np.ndarray, zoom: float) -> np.ndarray:
     y0 = (h - new_h) // 2
     cropped = frame[y0 : y0 + new_h, x0 : x0 + new_w]
     return cv2.resize(cropped, (w, h))
+
+
+def center_crop(frame: np.ndarray, zoom: float, cx: float = 0.5, cy: float = 0.5) -> np.ndarray:
+    """Cắt vùng zoom quanh tâm (cx, cy) (toạ độ 0-1 trên khung gốc, 0.5/0.5 = giữa khung),
+    KHÔNG resize lại và không copy (trả view). Vùng cắt luôn nằm trọn trong khung nên tâm
+    sát mép sẽ tự bị đẩy vào. Dùng cho ảnh xem trực tiếp; khung gốc đưa cho AI không bị đụng tới."""
+    if zoom <= 1.0:
+        return frame
+    h, w = frame.shape[:2]
+    new_w, new_h = max(1, int(w / zoom)), max(1, int(h / zoom))
+    x0 = min(max(int(cx * w) - new_w // 2, 0), w - new_w)
+    y0 = min(max(int(cy * h) - new_h // 2, 0), h - new_h)
+    return frame[y0 : y0 + new_h, x0 : x0 + new_w]
